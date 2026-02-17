@@ -89,6 +89,31 @@ func (v *DashboardView) SetSize(width, height int) {
 	v.height = height
 }
 
+// Cursor returns the current cursor position (flat interface index).
+func (v DashboardView) Cursor() int {
+	return v.cursor
+}
+
+// SelectedInterface returns the target label and InterfaceStats at the current
+// cursor position, or empty values if nothing is selected.
+func (v DashboardView) SelectedInterface() (label string, iface *engine.InterfaceStats) {
+	if v.snapshot == nil {
+		return "", nil
+	}
+	idx := 0
+	for _, g := range v.snapshot.Groups {
+		for _, t := range g.Targets {
+			for i := range t.Interfaces {
+				if idx == v.cursor {
+					return t.Label, &t.Interfaces[i]
+				}
+				idx++
+			}
+		}
+	}
+	return "", nil
+}
+
 // View renders the dashboard view.
 func (v DashboardView) View() string {
 	if v.snapshot == nil || len(v.snapshot.Groups) == 0 {

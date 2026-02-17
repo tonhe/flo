@@ -41,6 +41,7 @@ type AppModel struct {
 	provider   identity.Provider
 	dashboard  views.DashboardView
 	switcher   views.SwitcherView
+	detail     views.DetailView
 	width      int
 	height     int
 	activeDash string
@@ -61,6 +62,7 @@ func NewAppModel(cfg *config.Config, mgr *engine.Manager, provider identity.Prov
 		provider:  provider,
 		dashboard: views.NewDashboardView(theme),
 		switcher:  views.NewSwitcherView(theme),
+		detail:    views.NewDetailView(theme),
 	}
 }
 
@@ -82,7 +84,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		// Body height = total - 1 (header) - 2 (status bar lines)
-		m.dashboard.SetSize(msg.Width, msg.Height-3)
+		bodyHeight := msg.Height - 3
+		m.dashboard.SetSize(msg.Width, bodyHeight)
+		m.detail.SetSize(msg.Width, bodyHeight)
 		return m, nil
 
 	case TickMsg:
@@ -90,6 +94,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeDash != "" {
 			if snap, err := m.manager.GetSnapshot(m.activeDash); err == nil {
 				m.dashboard.SetSnapshot(snap)
+				// If viewing detail, refresh the selected interface data
+				if m.state == StateDetail {
+					label, iface := m.dashboard.SelectedInterface()
+					if iface != nil {
+						m.detail.SetInterface(label, iface)
+					}
+				}
 			}
 		}
 		return m, tickCmd()
@@ -111,8 +122,27 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshSwitcher()
 				return m, nil
 			}
+			// Open detail view on Enter
+			if key.Matches(msg, keys.DefaultKeyMap.Enter) {
+				label, iface := m.dashboard.SelectedInterface()
+				if iface != nil {
+					m.detail.SetInterface(label, iface)
+					m.state = StateDetail
+				}
+				return m, nil
+			}
 			var cmd tea.Cmd
 			m.dashboard, cmd = m.dashboard.Update(msg)
+			return m, cmd
+
+		case StateDetail:
+			var cmd tea.Cmd
+			var goBack bool
+			m.detail, cmd, goBack = m.detail.Update(msg)
+			if goBack {
+				m.state = StateDashboard
+				return m, nil
+			}
 			return m, cmd
 
 		case StateSwitcher:
@@ -207,6 +237,8 @@ func (m AppModel) View() string {
 	case StateSwitcher:
 		// Render the dashboard view underneath, then overlay the switcher modal
 		body = m.dashboard.View()
+	case StateDetail:
+		body = m.detail.View()
 	default:
 		body = "View not implemented"
 	}
