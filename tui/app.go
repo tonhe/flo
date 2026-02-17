@@ -44,6 +44,7 @@ type AppModel struct {
 	detail     views.DetailView
 	identity   views.IdentityView
 	builder    views.BuilderView
+	settings   views.SettingsView
 	width      int
 	height     int
 	activeDash string
@@ -92,6 +93,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detail.SetSize(msg.Width, bodyHeight)
 		m.identity.SetSize(msg.Width, bodyHeight)
 		m.builder.SetSize(msg.Width, bodyHeight)
+		m.settings.SetSize(msg.Width, bodyHeight)
 		return m, nil
 
 	case TickMsg:
@@ -139,6 +141,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.builder = views.NewBuilderView(m.theme, m.provider)
 				m.builder.SetSize(m.width, m.height-3)
 				m.state = StateBuilder
+				return m, nil
+			}
+			// Open settings on 's'
+			if key.Matches(msg, keys.DefaultKeyMap.Settings) {
+				m.settings = views.NewSettingsView(m.theme, m.config)
+				m.settings.SetSize(m.width, m.height-3)
+				m.state = StateSettings
 				return m, nil
 			}
 			// Open detail view on Enter
@@ -227,6 +236,31 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, cmd
+
+		case StateSettings:
+			var cmd tea.Cmd
+			var action views.SettingsAction
+			m.settings, cmd, action = m.settings.Update(msg)
+
+			switch action {
+			case views.SettingsClose:
+				m.state = StateDashboard
+				return m, nil
+
+			case views.SettingsSaved:
+				// Apply the new theme to all views
+				if t := styles.GetThemeByName(m.settings.SavedTheme); t != nil {
+					m.theme = *t
+					m.dashboard = views.NewDashboardView(m.theme)
+					m.dashboard.SetSize(m.width, m.height-3)
+					m.switcher = views.NewSwitcherView(m.theme)
+					m.detail = views.NewDetailView(m.theme)
+					m.identity = views.NewIdentityView(m.theme, m.provider)
+				}
+				m.state = StateDashboard
+				return m, nil
+			}
+			return m, cmd
 		}
 	}
 	return m, nil
@@ -296,6 +330,8 @@ func (m AppModel) View() string {
 		body = m.identity.View()
 	case StateBuilder:
 		body = m.builder.View()
+	case StateSettings:
+		body = m.settings.View()
 	default:
 		body = "View not implemented"
 	}
