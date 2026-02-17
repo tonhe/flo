@@ -42,6 +42,7 @@ type AppModel struct {
 	dashboard  views.DashboardView
 	switcher   views.SwitcherView
 	detail     views.DetailView
+	identity   views.IdentityView
 	width      int
 	height     int
 	activeDash string
@@ -63,6 +64,7 @@ func NewAppModel(cfg *config.Config, mgr *engine.Manager, provider identity.Prov
 		dashboard: views.NewDashboardView(theme),
 		switcher:  views.NewSwitcherView(theme),
 		detail:    views.NewDetailView(theme),
+		identity:  views.NewIdentityView(theme, provider),
 	}
 }
 
@@ -87,6 +89,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		bodyHeight := msg.Height - 3
 		m.dashboard.SetSize(msg.Width, bodyHeight)
 		m.detail.SetSize(msg.Width, bodyHeight)
+		m.identity.SetSize(msg.Width, bodyHeight)
 		return m, nil
 
 	case TickMsg:
@@ -122,6 +125,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshSwitcher()
 				return m, nil
 			}
+			// Open the identity manager on 'i'
+			if key.Matches(msg, keys.DefaultKeyMap.Identity) {
+				m.identity.SetSize(m.width, m.height-3)
+				m.identity.Refresh()
+				m.state = StateIdentity
+				return m, nil
+			}
 			// Open detail view on Enter
 			if key.Matches(msg, keys.DefaultKeyMap.Enter) {
 				label, iface := m.dashboard.SelectedInterface()
@@ -139,6 +149,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			var goBack bool
 			m.detail, cmd, goBack = m.detail.Update(msg)
+			if goBack {
+				m.state = StateDashboard
+				return m, nil
+			}
+			return m, cmd
+
+		case StateIdentity:
+			var cmd tea.Cmd
+			var goBack bool
+			m.identity, cmd, goBack = m.identity.Update(msg)
 			if goBack {
 				m.state = StateDashboard
 				return m, nil
@@ -239,6 +259,8 @@ func (m AppModel) View() string {
 		body = m.dashboard.View()
 	case StateDetail:
 		body = m.detail.View()
+	case StateIdentity:
+		body = m.identity.View()
 	default:
 		body = "View not implemented"
 	}
