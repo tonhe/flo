@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -45,34 +46,52 @@ type AppModel struct {
 	identity   views.IdentityView
 	builder    views.BuilderView
 	settings   views.SettingsView
+	help       views.HelpView
 	width      int
 	height     int
-	activeDash string
+	activeDash    string
+	startDashName string // auto-start dashboard from --dashboard flag
 }
 
 // NewAppModel creates a new AppModel with the given config, engine manager,
-// and identity provider.
-func NewAppModel(cfg *config.Config, mgr *engine.Manager, provider identity.Provider) AppModel {
+// and identity provider. If startDash is non-empty, that dashboard will be
+// loaded and started automatically on Init.
+func NewAppModel(cfg *config.Config, mgr *engine.Manager, provider identity.Provider, startDash string) AppModel {
 	theme := styles.DefaultTheme
 	if t := styles.GetThemeByName(cfg.Theme); t != nil {
 		theme = *t
 	}
 	return AppModel{
-		state:     StateDashboard,
-		theme:     theme,
-		config:    cfg,
-		manager:   mgr,
-		provider:  provider,
-		dashboard: views.NewDashboardView(theme),
-		switcher:  views.NewSwitcherView(theme),
-		detail:    views.NewDetailView(theme),
-		identity:  views.NewIdentityView(theme, provider),
+		state:         StateDashboard,
+		theme:         theme,
+		config:        cfg,
+		manager:       mgr,
+		provider:      provider,
+		dashboard:     views.NewDashboardView(theme),
+		switcher:      views.NewSwitcherView(theme),
+		detail:        views.NewDetailView(theme),
+		identity:      views.NewIdentityView(theme, provider),
+		help:          views.NewHelpView(theme),
+		startDashName: startDash,
 	}
 }
 
-// Init returns the initial command to start the tick loop.
+// autoStartMsg is sent after Init to trigger dashboard auto-loading.
+type autoStartMsg struct {
+	name string
+}
+
+// Init returns the initial command to start the tick loop and optionally
+// auto-start a dashboard.
 func (m AppModel) Init() tea.Cmd {
-	return tickCmd()
+	cmds := []tea.Cmd{tickCmd()}
+	if m.startDashName != "" {
+		name := m.startDashName
+		cmds = append(cmds, func() tea.Msg {
+			return autoStartMsg{name: name}
+		})
+	}
+	return tea.Batch(cmds...)
 }
 
 func tickCmd() tea.Cmd {
@@ -84,6 +103,22 @@ func tickCmd() tea.Cmd {
 // Update handles messages and dispatches to the active view.
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case autoStartMsg:
+		dashDir, err := config.GetDashboardsDir()
+		if err != nil {
+			return m, nil
+		}
+		path := filepath.Join(dashDir, msg.name+".toml")
+		dash, err := dashboard.LoadDashboard(path)
+		if err != nil {
+			return m, nil
+		}
+		if m.provider != nil {
+			_ = m.manager.Start(dash, m.provider)
+		}
+		m.activeDash = dash.Name
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -94,6 +129,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.identity.SetSize(msg.Width, bodyHeight)
 		m.builder.SetSize(msg.Width, bodyHeight)
 		m.settings.SetSize(msg.Width, bodyHeight)
+		m.help.SetSize(msg.Width, msg.Height)
 		return m, nil
 
 	case TickMsg:
@@ -113,11 +149,23 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickCmd()
 
 	case tea.KeyMsg:
+		// Help overlay intercepts all keys when visible
+		if m.help.IsVisible() {
+			if key.Matches(msg, keys.DefaultKeyMap.Help) || key.Matches(msg, keys.DefaultKeyMap.Escape) {
+				m.help.Toggle()
+			}
+			return m, nil
+		}
+
 		// Global key bindings
 		switch {
 		case key.Matches(msg, keys.DefaultKeyMap.Quit):
 			m.manager.StopAll()
 			return m, tea.Quit
+		case key.Matches(msg, keys.DefaultKeyMap.Help):
+			m.help.SetSize(m.width, m.height)
+			m.help.Toggle()
+			return m, nil
 		}
 
 		// State-specific key handling
@@ -148,6 +196,15 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.settings = views.NewSettingsView(m.theme, m.config)
 				m.settings.SetSize(m.width, m.height-3)
 				m.state = StateSettings
+				return m, nil
+			}
+			// Force refresh on 'r'
+			if key.Matches(msg, keys.DefaultKeyMap.Refresh) {
+				if m.activeDash != "" {
+					if snap, err := m.manager.GetSnapshot(m.activeDash); err == nil {
+						m.dashboard.SetSnapshot(snap)
+					}
+				}
 				return m, nil
 			}
 			// Open detail view on Enter
@@ -256,6 +313,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.switcher = views.NewSwitcherView(m.theme)
 					m.detail = views.NewDetailView(m.theme)
 					m.identity = views.NewIdentityView(m.theme, m.provider)
+					m.help = views.NewHelpView(m.theme)
 				}
 				m.state = StateDashboard
 				return m, nil
@@ -375,6 +433,12 @@ func (m AppModel) View() string {
 	// When the switcher is active, overlay it on top of the composed screen.
 	if m.state == StateSwitcher {
 		overlay := m.switcher.View()
+		full = overlayCenter(full, overlay, m.width, m.height)
+	}
+
+	// Help overlay renders on top of everything.
+	if m.help.IsVisible() {
+		overlay := m.help.View()
 		full = overlayCenter(full, overlay, m.width, m.height)
 	}
 

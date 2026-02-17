@@ -9,8 +9,10 @@ import (
 	"github.com/tonhe/flo/cmd"
 	"github.com/tonhe/flo/internal/config"
 	"github.com/tonhe/flo/internal/engine"
+	"github.com/tonhe/flo/internal/identity"
 	"github.com/tonhe/flo/tui"
 	"github.com/tonhe/flo/tui/styles"
+	"golang.org/x/term"
 )
 
 func main() {
@@ -48,7 +50,13 @@ func main() {
 		return
 	}
 
-	// Otherwise launch the TUI
+	// Ensure all required directories exist
+	if err := config.EnsureDirs(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating config directories: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Load configuration
 	cfg := config.DefaultConfig()
 
 	cfgDir, err := config.GetConfigDir()
@@ -68,10 +76,33 @@ func main() {
 		}
 	}
 
-	_ = dashboardFlag // stored for future use when auto-loading dashboards
+	// Open identity store if it exists.
+	// Prompt for master password unless FLO_MASTER_KEY env var is set.
+	var provider identity.Provider
+	storePath, err := config.GetIdentityStorePath()
+	if err == nil {
+		if _, statErr := os.Stat(storePath); statErr == nil {
+			password := []byte(os.Getenv("FLO_MASTER_KEY"))
+			if len(password) == 0 {
+				fmt.Fprint(os.Stderr, "Master password: ")
+				password, err = term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Fprintln(os.Stderr) // newline after hidden input
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+					os.Exit(1)
+				}
+			}
+			store, storeErr := identity.NewFileStore(storePath, password)
+			if storeErr != nil {
+				fmt.Fprintf(os.Stderr, "Error opening identity store: %v\n", storeErr)
+				os.Exit(1)
+			}
+			provider = store
+		}
+	}
 
 	mgr := engine.NewManager()
-	model := tui.NewAppModel(cfg, mgr, nil)
+	model := tui.NewAppModel(cfg, mgr, provider, dashboardFlag)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
