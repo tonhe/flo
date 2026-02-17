@@ -1,13 +1,16 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tonhe/flo/internal/config"
+	"github.com/tonhe/flo/internal/dashboard"
 	"github.com/tonhe/flo/internal/engine"
+	"github.com/tonhe/flo/internal/identity"
 	"github.com/tonhe/flo/tui/components"
 	"github.com/tonhe/flo/tui/keys"
 	"github.com/tonhe/flo/tui/styles"
@@ -35,14 +38,17 @@ type AppModel struct {
 	theme      styles.Theme
 	config     *config.Config
 	manager    *engine.Manager
+	provider   identity.Provider
 	dashboard  views.DashboardView
+	switcher   views.SwitcherView
 	width      int
 	height     int
 	activeDash string
 }
 
-// NewAppModel creates a new AppModel with the given config and engine manager.
-func NewAppModel(cfg *config.Config, mgr *engine.Manager) AppModel {
+// NewAppModel creates a new AppModel with the given config, engine manager,
+// and identity provider.
+func NewAppModel(cfg *config.Config, mgr *engine.Manager, provider identity.Provider) AppModel {
 	theme := styles.DefaultTheme
 	if t := styles.GetThemeByName(cfg.Theme); t != nil {
 		theme = *t
@@ -52,7 +58,9 @@ func NewAppModel(cfg *config.Config, mgr *engine.Manager) AppModel {
 		theme:     theme,
 		config:    cfg,
 		manager:   mgr,
+		provider:  provider,
 		dashboard: views.NewDashboardView(theme),
+		switcher:  views.NewSwitcherView(theme),
 	}
 }
 
@@ -97,12 +105,81 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// State-specific key handling
 		switch m.state {
 		case StateDashboard:
+			// Open the dashboard switcher on 'd'
+			if key.Matches(msg, keys.DefaultKeyMap.Dashboard) {
+				m.state = StateSwitcher
+				m.refreshSwitcher()
+				return m, nil
+			}
 			var cmd tea.Cmd
 			m.dashboard, cmd = m.dashboard.Update(msg)
+			return m, cmd
+
+		case StateSwitcher:
+			var cmd tea.Cmd
+			var action views.SwitcherAction
+			m.switcher, cmd, action = m.switcher.Update(msg)
+
+			switch action {
+			case views.ActionClose:
+				m.state = StateDashboard
+				return m, nil
+
+			case views.ActionSwitch:
+				if item := m.switcher.SelectedItem(); item != nil {
+					m.switchToDashboard(item)
+				}
+				m.state = StateDashboard
+				return m, nil
+
+			case views.ActionStop:
+				if item := m.switcher.SelectedItem(); item != nil && item.Running {
+					_ = m.manager.Stop(item.Name)
+					if m.activeDash == item.Name {
+						m.activeDash = ""
+						m.dashboard.SetSnapshot(nil)
+					}
+					m.refreshSwitcher()
+				}
+				return m, nil
+			}
 			return m, cmd
 		}
 	}
 	return m, nil
+}
+
+// refreshSwitcher reloads the dashboard list into the switcher view.
+func (m *AppModel) refreshSwitcher() {
+	dashDir, err := config.GetDashboardsDir()
+	if err != nil {
+		return
+	}
+	m.switcher.SetSize(m.width, m.height-3)
+	m.switcher.Refresh(dashDir, m.manager)
+}
+
+// switchToDashboard loads and activates the selected dashboard, starting its
+// engine if it is not already running.
+func (m *AppModel) switchToDashboard(item *views.SwitcherItem) {
+	// If this engine is already running, just switch the active view.
+	if item.Running {
+		m.activeDash = item.Name
+		return
+	}
+
+	// Load the dashboard TOML and start a new engine.
+	dash, err := dashboard.LoadDashboard(item.FilePath)
+	if err != nil {
+		return
+	}
+
+	if m.provider != nil {
+		if err := m.manager.Start(dash, m.provider); err != nil {
+			return
+		}
+	}
+	m.activeDash = dash.Name
 }
 
 // View renders the full application UI by composing header, body, and status.
@@ -126,6 +203,9 @@ func (m AppModel) View() string {
 	var body string
 	switch m.state {
 	case StateDashboard:
+		body = m.dashboard.View()
+	case StateSwitcher:
+		// Render the dashboard view underneath, then overlay the switcher modal
 		body = m.dashboard.View()
 	default:
 		body = "View not implemented"
@@ -165,5 +245,64 @@ func (m AppModel) View() string {
 		Background(m.theme.Base00).
 		Foreground(m.theme.Base05)
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, bodyStyle.Render(body), statusBar)
+	full := lipgloss.JoinVertical(lipgloss.Left, header, bodyStyle.Render(body), statusBar)
+
+	// When the switcher is active, overlay it on top of the composed screen.
+	if m.state == StateSwitcher {
+		overlay := m.switcher.View()
+		full = overlayCenter(full, overlay, m.width, m.height)
+	}
+
+	return full
+}
+
+// overlayCenter composites the overlay string on top of the background string,
+// centering the overlay within the given width and height. Non-space characters
+// in the overlay replace the corresponding characters in the background.
+func overlayCenter(bg, fg string, width, height int) string {
+	bgLines := strings.Split(bg, "\n")
+	fgLines := strings.Split(fg, "\n")
+
+	// Pad background to full height if needed
+	for len(bgLines) < height {
+		bgLines = append(bgLines, strings.Repeat(" ", width))
+	}
+
+	// Calculate vertical offset to center the overlay
+	yOff := (height - len(fgLines)) / 2
+	if yOff < 0 {
+		yOff = 0
+	}
+
+	for i, fgLine := range fgLines {
+		bgIdx := yOff + i
+		if bgIdx >= len(bgLines) {
+			break
+		}
+
+		bgRunes := []rune(bgLines[bgIdx])
+		fgRunes := []rune(fgLine)
+
+		// Calculate horizontal offset to center this line
+		xOff := (width - len(fgRunes)) / 2
+		if xOff < 0 {
+			xOff = 0
+		}
+
+		// Ensure the background line is wide enough
+		for len(bgRunes) < width {
+			bgRunes = append(bgRunes, ' ')
+		}
+
+		// Overlay foreground onto background
+		for j, r := range fgRunes {
+			pos := xOff + j
+			if pos < len(bgRunes) {
+				bgRunes[pos] = r
+			}
+		}
+		bgLines[bgIdx] = string(bgRunes)
+	}
+
+	return strings.Join(bgLines, "\n")
 }

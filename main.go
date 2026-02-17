@@ -23,7 +23,7 @@ func main() {
 	}
 
 	mgr := engine.NewManager()
-	model := tui.NewAppModel(cfg, mgr)
+	model := tui.NewAppModel(cfg, mgr, nil)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
