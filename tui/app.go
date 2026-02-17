@@ -43,6 +43,7 @@ type AppModel struct {
 	switcher   views.SwitcherView
 	detail     views.DetailView
 	identity   views.IdentityView
+	builder    views.BuilderView
 	width      int
 	height     int
 	activeDash string
@@ -90,6 +91,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dashboard.SetSize(msg.Width, bodyHeight)
 		m.detail.SetSize(msg.Width, bodyHeight)
 		m.identity.SetSize(msg.Width, bodyHeight)
+		m.builder.SetSize(msg.Width, bodyHeight)
 		return m, nil
 
 	case TickMsg:
@@ -130,6 +132,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.identity.SetSize(m.width, m.height-3)
 				m.identity.Refresh()
 				m.state = StateIdentity
+				return m, nil
+			}
+			// Open the dashboard builder on 'n'
+			if key.Matches(msg, keys.DefaultKeyMap.New) {
+				m.builder = views.NewBuilderView(m.theme, m.provider)
+				m.builder.SetSize(m.width, m.height-3)
+				m.state = StateBuilder
 				return m, nil
 			}
 			// Open detail view on Enter
@@ -191,6 +200,30 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.refreshSwitcher()
 				}
+				return m, nil
+			}
+			return m, cmd
+
+		case StateBuilder:
+			var cmd tea.Cmd
+			var action views.BuilderAction
+			m.builder, cmd, action = m.builder.Update(msg)
+
+			switch action {
+			case views.BuilderActionClose:
+				m.state = StateDashboard
+				return m, nil
+
+			case views.BuilderActionSave:
+				// Load the saved dashboard and start its engine
+				path := m.builder.SavedPath
+				if dash, err := dashboard.LoadDashboard(path); err == nil {
+					if m.provider != nil {
+						_ = m.manager.Start(dash, m.provider)
+					}
+					m.activeDash = dash.Name
+				}
+				m.state = StateDashboard
 				return m, nil
 			}
 			return m, cmd
@@ -261,6 +294,8 @@ func (m AppModel) View() string {
 		body = m.detail.View()
 	case StateIdentity:
 		body = m.identity.View()
+	case StateBuilder:
+		body = m.builder.View()
 	default:
 		body = "View not implemented"
 	}
