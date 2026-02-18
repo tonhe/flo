@@ -90,6 +90,8 @@ type EditorView struct {
 
 	identities []string
 
+	addHostBaseLen int // target count before add-host started
+
 	SavedPath string
 	err       string
 }
@@ -404,6 +406,7 @@ func (e EditorView) updateHostInline(msg tea.Msg) (EditorView, tea.Cmd, EditorAc
 // --- Add host mode ---
 
 func (e *EditorView) initAddHostInputs() {
+	e.addHostBaseLen = len(e.targets)
 	e.input = textinput.New()
 	e.input.Placeholder = "host IP or hostname"
 	e.input.CharLimit = 128
@@ -418,9 +421,9 @@ func (e EditorView) updateAddHost(msg tea.Msg) (EditorView, tea.Cmd, EditorActio
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, keys.DefaultKeyMap.Escape):
-			// If we were mid-add and already appended a partial target, remove it
-			if e.detailCur > 0 && len(e.targets) > 0 {
-				e.targets = e.targets[:len(e.targets)-1]
+			// Remove any partial target added during this add-host session
+			if len(e.targets) > e.addHostBaseLen {
+				e.targets = e.targets[:e.addHostBaseLen]
 			}
 			e.mode = modeMenu
 			return e, nil, EditorActionNone
