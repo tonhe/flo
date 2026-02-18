@@ -270,8 +270,15 @@ func (v DashboardView) renderInterfaceRow(
 	ifName := rowStyle.Render(padRight(truncate(iface.Name, wIface-1), wIface))
 
 	// Status with color
+	notPolled := iface.Status == ""
 	var statusStr string
 	switch iface.Status {
+	case "":
+		st := lipgloss.NewStyle().Foreground(v.theme.Base04)
+		if selected {
+			st = st.Background(v.theme.Base02)
+		}
+		statusStr = st.Render(padRight("...", wStatus))
 	case "up":
 		st := v.sty.StatusUp
 		if selected {
@@ -293,31 +300,41 @@ func (v DashboardView) renderInterfaceRow(
 	}
 
 	// In/Out rates
-	inStr := rowStyle.Render(padLeft(components.FormatRate(iface.InRate), wIn))
-	outStr := rowStyle.Render(padLeft(components.FormatRate(iface.OutRate), wOut))
+	var inStr, outStr string
+	if notPolled {
+		inStr = rowStyle.Render(padLeft("---", wIn))
+		outStr = rowStyle.Render(padLeft("---", wOut))
+	} else {
+		inStr = rowStyle.Render(padLeft(components.FormatRate(iface.InRate), wIn))
+		outStr = rowStyle.Render(padLeft(components.FormatRate(iface.OutRate), wOut))
+	}
 
 	// Utilization with threshold coloring
 	var utilStr string
-	utilText := fmt.Sprintf("%.1f%%", iface.Utilization)
-	switch {
-	case iface.Utilization >= 80:
-		st := v.sty.UtilHigh
-		if selected {
-			st = st.Background(v.theme.Base02)
+	if notPolled {
+		utilStr = rowStyle.Render(padLeft("---", wUtil))
+	} else {
+		utilText := fmt.Sprintf("%.1f%%", iface.Utilization)
+		switch {
+		case iface.Utilization >= 80:
+			st := v.sty.UtilHigh
+			if selected {
+				st = st.Background(v.theme.Base02)
+			}
+			utilStr = st.Render(padLeft(utilText, wUtil))
+		case iface.Utilization >= 50:
+			st := v.sty.UtilMid
+			if selected {
+				st = st.Background(v.theme.Base02)
+			}
+			utilStr = st.Render(padLeft(utilText, wUtil))
+		default:
+			st := v.sty.UtilLow
+			if selected {
+				st = st.Background(v.theme.Base02)
+			}
+			utilStr = st.Render(padLeft(utilText, wUtil))
 		}
-		utilStr = st.Render(padLeft(utilText, wUtil))
-	case iface.Utilization >= 50:
-		st := v.sty.UtilMid
-		if selected {
-			st = st.Background(v.theme.Base02)
-		}
-		utilStr = st.Render(padLeft(utilText, wUtil))
-	default:
-		st := v.sty.UtilLow
-		if selected {
-			st = st.Background(v.theme.Base02)
-		}
-		utilStr = st.Render(padLeft(utilText, wUtil))
 	}
 
 	// Sparkline from history

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -39,12 +40,41 @@ func NewPoller(dash *dashboard.Dashboard, provider identity.Provider) (*Poller, 
 	return p, nil
 }
 
+// initTargetStats pre-populates empty stats for all configured targets and
+// interfaces without performing any SNMP calls. This allows the UI to render
+// immediately while the first poll runs asynchronously.
+func (p *Poller) initTargetStats() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, group := range p.dash.Groups {
+		for _, target := range group.Targets {
+			ts := &TargetStats{
+				Host:  target.Host,
+				Label: target.Label,
+			}
+			for _, ifName := range target.Interfaces {
+				ts.Interfaces = append(ts.Interfaces, InterfaceStats{
+					Name:    ifName,
+					Status:  "",
+					History: NewRingBuffer[RateSample](p.dash.MaxHistory),
+				})
+			}
+			p.data[target.Host] = ts
+		}
+	}
+	p.notify()
+}
+
 // Run starts the polling loop. It blocks until Stop is called.
+// It pre-populates empty stats so the UI can render immediately,
+// then kicks off the first poll asynchronously.
 func (p *Poller) Run() {
+	p.initTargetStats()
+
 	ticker := time.NewTicker(p.dash.Interval)
 	defer ticker.Stop()
 
-	p.poll()
+	go p.poll()
 
 	for {
 		select {
@@ -146,23 +176,98 @@ func (p *Poller) getOrCreateClient(target dashboard.Target) (*gosnmp.GoSNMP, err
 }
 
 // getOrCreateTargetStats returns existing stats or initializes new ones.
+// On first call for a target, it performs SNMP walks to resolve interface
+// names to ifIndex values and discover interface speeds.
+// If stats were pre-populated by initTargetStats (IfIndex == 0), the
+// interface resolution is performed on this call.
 func (p *Poller) getOrCreateTargetStats(target dashboard.Target) *TargetStats {
 	if ts, ok := p.data[target.Host]; ok {
+		// If interfaces haven't been resolved yet (pre-populated), resolve now
+		if len(ts.Interfaces) > 0 && ts.Interfaces[0].IfIndex == 0 {
+			resolved := p.resolveInterfaces(target)
+			for i, iface := range ts.Interfaces {
+				if info, found := resolved[iface.Name]; found {
+					ts.Interfaces[i].IfIndex = info.IfIndex
+					ts.Interfaces[i].Speed = info.Speed
+					ts.Interfaces[i].Description = info.Description
+				}
+			}
+		}
 		return ts
 	}
 
+	// Fallback: create new (should not happen after initTargetStats)
 	ts := &TargetStats{
 		Host:  target.Host,
 		Label: target.Label,
 	}
+
+	resolved := p.resolveInterfaces(target)
+
 	for _, ifName := range target.Interfaces {
-		ts.Interfaces = append(ts.Interfaces, InterfaceStats{
+		stats := InterfaceStats{
 			Name:    ifName,
 			History: NewRingBuffer[RateSample](p.dash.MaxHistory),
-		})
+		}
+		if info, ok := resolved[ifName]; ok {
+			stats.IfIndex = info.IfIndex
+			stats.Speed = info.Speed
+			stats.Description = info.Description
+		}
+		ts.Interfaces = append(ts.Interfaces, stats)
 	}
 	p.data[target.Host] = ts
 	return ts
+}
+
+// resolveInterfaces walks ifName, ifDescr, and ifHighSpeed on the target
+// to build a mapping from interface name -> (ifIndex, speed, description).
+// This is needed because dashboard configs reference interfaces by name,
+// but SNMP counters are indexed by ifIndex.
+func (p *Poller) resolveInterfaces(target dashboard.Target) map[string]DiscoveredInterface {
+	result := make(map[string]DiscoveredInterface)
+
+	client, err := p.getOrCreateClient(target)
+	if err != nil {
+		return result
+	}
+
+	// Build ifIndex -> DiscoveredInterface from walks
+	byIndex := make(map[int]*DiscoveredInterface)
+
+	walkOID(client, OIDifName, func(idx int, val string) {
+		if _, ok := byIndex[idx]; !ok {
+			byIndex[idx] = &DiscoveredInterface{IfIndex: idx}
+		}
+		byIndex[idx].Name = val
+	})
+
+	walkOID(client, OIDifDescr, func(idx int, val string) {
+		if _, ok := byIndex[idx]; !ok {
+			byIndex[idx] = &DiscoveredInterface{IfIndex: idx}
+		}
+		if byIndex[idx].Name == "" {
+			byIndex[idx].Name = val
+		}
+		byIndex[idx].Description = val
+	})
+
+	walkOID(client, OIDifHighSpeed, func(idx int, val string) {
+		if iface, ok := byIndex[idx]; ok {
+			speed, _ := strconv.ParseUint(val, 10, 64)
+			iface.Speed = speed
+		}
+	})
+
+	// Map by name (exact match) and also by description (fallback)
+	for _, iface := range byIndex {
+		result[iface.Name] = *iface
+		if iface.Description != "" && iface.Description != iface.Name {
+			result[iface.Description] = *iface
+		}
+	}
+
+	return result
 }
 
 // getInterfaceCounters fetches HC in/out octet counters for a single interface.
