@@ -13,6 +13,7 @@ import (
 	"github.com/tonhe/flo/internal/config"
 	"github.com/tonhe/flo/internal/dashboard"
 	"github.com/tonhe/flo/internal/identity"
+	"github.com/tonhe/flo/tui/components"
 	"github.com/tonhe/flo/tui/keys"
 	"github.com/tonhe/flo/tui/styles"
 )
@@ -71,6 +72,11 @@ type BuilderView struct {
 
 	editMode bool   // true when editing an existing dashboard
 	editPath string // file path to overwrite in edit mode
+
+	// Identity picker overlay
+	showPicker   bool
+	picker       components.IdentityPickerModel
+	pickerTarget string // "step1" or "step2"
 }
 
 // step1 field count
@@ -230,6 +236,28 @@ func (b *BuilderView) focusStep1(idx int) {
 }
 
 func (b BuilderView) updateStepName(msg tea.Msg) (BuilderView, tea.Cmd, BuilderAction) {
+	if b.showPicker {
+		var cmd tea.Cmd
+		var action components.PickerAction
+		b.picker, cmd, action = b.picker.Update(msg)
+		switch action {
+		case components.PickerSelected:
+			b.identityInput.SetValue(b.picker.SelectedName())
+			b.showPicker = false
+			if b.provider != nil {
+				b.identities = nil
+				if sums, err := b.provider.List(); err == nil {
+					for _, s := range sums {
+						b.identities = append(b.identities, s.Name)
+					}
+				}
+			}
+		case components.PickerCancelled:
+			b.showPicker = false
+		}
+		return b, cmd, BuilderActionNone
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
@@ -245,6 +273,14 @@ func (b BuilderView) updateStepName(msg tea.Msg) (BuilderView, tea.Cmd, BuilderA
 			return b, nil, BuilderActionNone
 
 		case msg.String() == "enter":
+			// If on the identity field, open the picker
+			if b.step1Focus == 1 {
+				b.picker = components.NewIdentityPickerModel(b.theme, b.provider)
+				b.picker.SetSize(b.width, b.height)
+				b.showPicker = true
+				b.pickerTarget = "step1"
+				return b, nil, BuilderActionNone
+			}
 			// If not on last field, advance focus
 			if b.step1Focus < step1Fields-1 {
 				b.focusStep1(b.step1Focus + 1)
@@ -284,6 +320,10 @@ func (b BuilderView) updateStepName(msg tea.Msg) (BuilderView, tea.Cmd, BuilderA
 }
 
 func (b BuilderView) viewStepName() string {
+	if b.showPicker {
+		return b.picker.View()
+	}
+
 	titleStyle := lipgloss.NewStyle().
 		Foreground(b.theme.Base0D).
 		Bold(true)
@@ -329,13 +369,6 @@ func (b BuilderView) viewStepName() string {
 			lbl = activeLabelStyle
 		}
 		s.WriteString(fmt.Sprintf("  %s%s%s\n", indicator, lbl.Render(padRight(f.label+":", 18)), f.view))
-	}
-
-	// Show available identities as a hint
-	if len(b.identities) > 0 {
-		hintStyle := lipgloss.NewStyle().Foreground(b.theme.Base04)
-		s.WriteString("\n")
-		s.WriteString("  " + hintStyle.Render("Available identities: "+strings.Join(b.identities, ", ")) + "\n")
 	}
 
 	s.WriteString("\n")
@@ -443,6 +476,28 @@ func (b *BuilderView) commitCurrentTarget() bool {
 }
 
 func (b BuilderView) updateStepTargets(msg tea.Msg) (BuilderView, tea.Cmd, BuilderAction) {
+	if b.showPicker {
+		var cmd tea.Cmd
+		var action components.PickerAction
+		b.picker, cmd, action = b.picker.Update(msg)
+		switch action {
+		case components.PickerSelected:
+			b.targetIdentity.SetValue(b.picker.SelectedName())
+			b.showPicker = false
+			if b.provider != nil {
+				b.identities = nil
+				if sums, err := b.provider.List(); err == nil {
+					for _, s := range sums {
+						b.identities = append(b.identities, s.Name)
+					}
+				}
+			}
+		case components.PickerCancelled:
+			b.showPicker = false
+		}
+		return b, cmd, BuilderActionNone
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
@@ -481,6 +536,14 @@ func (b BuilderView) updateStepTargets(msg tea.Msg) (BuilderView, tea.Cmd, Build
 
 		case msg.String() == "enter":
 			if b.addingTarget {
+				// If on the identity field, open the picker
+				if b.step2Focus == 2 {
+					b.picker = components.NewIdentityPickerModel(b.theme, b.provider)
+					b.picker.SetSize(b.width, b.height)
+					b.showPicker = true
+					b.pickerTarget = "step2"
+					return b, nil, BuilderActionNone
+				}
 				// If not on last field, advance focus
 				if b.step2Focus < step2Fields-1 {
 					b.focusStep2(b.step2Focus + 1)
@@ -619,6 +682,10 @@ func (b BuilderView) updateStepTargets(msg tea.Msg) (BuilderView, tea.Cmd, Build
 }
 
 func (b BuilderView) viewStepTargets() string {
+	if b.showPicker {
+		return b.picker.View()
+	}
+
 	titleStyle := lipgloss.NewStyle().
 		Foreground(b.theme.Base0D).
 		Bold(true)

@@ -19,3 +19,4 @@
 - Show dashboard UI immediately with "..." connecting status, first poll runs async
 - Replace builder edit mode with nbor-style editor menu (inline editing, host drill-in)
 - Fix UI freeze during SNMP polling (non-blocking TrySnapshot/TryInfo with atomic cache)
+- Replace free-text identity inputs in builder with modal identity picker (step 1 defaults, step 2 per-target overrides)
