@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.1.0
 
 - Add GitHub Actions release pipeline with GoReleaser (macOS, Linux, Windows; amd64 + arm64)
 - Add .deb and .rpm Linux packages via nfpm
