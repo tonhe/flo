@@ -67,6 +67,9 @@ type BuilderView struct {
 	// Step 3: Review
 	SavedPath string // path to the saved TOML file after save
 	err       string
+
+	editMode bool   // true when editing an existing dashboard
+	editPath string // file path to overwrite in edit mode
 }
 
 // step1 field count
@@ -149,9 +152,28 @@ func (b *BuilderView) SetSize(width, height int) {
 }
 
 // LoadDashboard populates the builder from an existing dashboard for editing.
-// This is a stub that will be fully implemented in a later task.
 func (b *BuilderView) LoadDashboard(dash *dashboard.Dashboard, path string) {
-	// TODO: implement in Task 3
+	b.editMode = true
+	b.editPath = path
+
+	// Step 1 fields
+	b.nameInput.SetValue(dash.Name)
+	b.identityInput.SetValue(dash.DefaultIdentity)
+	b.intervalInput.SetValue(dash.Interval.String())
+
+	// Step 2: flatten all groups' targets
+	b.targets = nil
+	for _, g := range dash.Groups {
+		for _, t := range g.Targets {
+			b.targets = append(b.targets, t)
+		}
+	}
+
+	// If there are targets, start at target list (not adding mode)
+	if len(b.targets) > 0 {
+		b.addingTarget = false
+		b.targetCursor = 0
+	}
 }
 
 // Update handles messages for the builder wizard.
@@ -272,8 +294,12 @@ func (b BuilderView) viewStepName() string {
 
 	var s strings.Builder
 
+	title := "New Dashboard"
+	if b.editMode {
+		title = "Edit Dashboard"
+	}
 	s.WriteString("\n")
-	s.WriteString("  " + titleStyle.Render("New Dashboard") + "  " + stepStyle.Render("Step 1 of 3") + "\n")
+	s.WriteString("  " + titleStyle.Render(title) + "  " + stepStyle.Render("Step 1 of 3") + "\n")
 	s.WriteString("\n")
 
 	if b.err != "" {
@@ -562,8 +588,12 @@ func (b BuilderView) viewStepTargets() string {
 
 	var s strings.Builder
 
+	title := "New Dashboard"
+	if b.editMode {
+		title = "Edit Dashboard"
+	}
 	s.WriteString("\n")
-	s.WriteString("  " + titleStyle.Render("New Dashboard") + "  " + stepStyle.Render("Step 2 of 3 - Add Targets") + "\n")
+	s.WriteString("  " + titleStyle.Render(title) + "  " + stepStyle.Render("Step 2 of 3 - Add Targets") + "\n")
 	s.WriteString("\n")
 
 	if b.err != "" {
@@ -768,18 +798,23 @@ func (b BuilderView) saveDashboard() (BuilderView, tea.Cmd, BuilderAction) {
 		},
 	}
 
-	dashDir, err := config.GetDashboardsDir()
-	if err != nil {
-		b.err = fmt.Sprintf("Failed to get dashboards dir: %v", err)
-		return b, nil, BuilderActionNone
-	}
+	var path string
+	if b.editMode {
+		path = b.editPath
+	} else {
+		dashDir, err := config.GetDashboardsDir()
+		if err != nil {
+			b.err = fmt.Sprintf("Failed to get dashboards dir: %v", err)
+			return b, nil, BuilderActionNone
+		}
 
-	slug := slugify(name)
-	path := filepath.Join(dashDir, slug+".toml")
+		slug := slugify(name)
+		path = filepath.Join(dashDir, slug+".toml")
 
-	if err := config.EnsureDirs(); err != nil {
-		b.err = fmt.Sprintf("Failed to create directories: %v", err)
-		return b, nil, BuilderActionNone
+		if err := config.EnsureDirs(); err != nil {
+			b.err = fmt.Sprintf("Failed to create directories: %v", err)
+			return b, nil, BuilderActionNone
+		}
 	}
 
 	if err := dashboard.SaveDashboard(dash, path); err != nil {
@@ -806,8 +841,12 @@ func (b BuilderView) viewStepReview() string {
 
 	var s strings.Builder
 
+	title := "New Dashboard"
+	if b.editMode {
+		title = "Edit Dashboard"
+	}
 	s.WriteString("\n")
-	s.WriteString("  " + titleStyle.Render("New Dashboard") + "  " + stepStyle.Render("Step 3 of 3 - Review") + "\n")
+	s.WriteString("  " + titleStyle.Render(title) + "  " + stepStyle.Render("Step 3 of 3 - Review") + "\n")
 	s.WriteString("\n")
 
 	if b.err != "" {
@@ -850,10 +889,14 @@ func (b BuilderView) viewStepReview() string {
 		))
 	}
 
-	slug := slugify(name)
 	s.WriteString("\n")
 	saveHint := lipgloss.NewStyle().Foreground(b.theme.Base04)
-	s.WriteString("  " + saveHint.Render(fmt.Sprintf("Will save to: %s.toml", slug)) + "\n")
+	if b.editMode {
+		s.WriteString("  " + saveHint.Render(fmt.Sprintf("Will save to: %s", filepath.Base(b.editPath))) + "\n")
+	} else {
+		slug := slugify(name)
+		s.WriteString("  " + saveHint.Render(fmt.Sprintf("Will save to: %s.toml", slug)) + "\n")
+	}
 
 	s.WriteString("\n")
 	s.WriteString("  " + b.renderStep3Help() + "\n")
