@@ -3,6 +3,7 @@
 ## TUI / UX
 
 - [ ] Interface discovery with checkbox selection when adding interfaces to a dashboard
+- [ ] Add identity picker interface for confiruing defaults, or host identities. 
 
 ## Dashboard / Polling
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add GitHub Actions release pipeline with GoReleaser (macOS, Linux, Windows; amd64 + arm64)
+- Add .deb and .rpm Linux packages via nfpm
 - Fix status bar background bleed-through by propagating Background to inner styles
 - Fix modal rendering by replacing ANSI-unaware overlayCenter with lipgloss.Place()
 - Fix modal title injection that corrupted ANSI border lines
@@ -16,3 +18,4 @@
 - Apply themed background to modal and empty-state screens
 - Show dashboard UI immediately with "..." connecting status, first poll runs async
 - Replace builder edit mode with nbor-style editor menu (inline editing, host drill-in)
+- Fix UI freeze during SNMP polling (non-blocking TrySnapshot/TryInfo with atomic cache)

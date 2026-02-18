@@ -63,6 +63,7 @@ type BuilderView struct {
 	targetCursor    int
 	step2Focus      int
 	addingTarget    bool
+	editingIndex    int // -1 = adding new, >= 0 = editing target at index
 
 	// Step 3: Review
 	SavedPath string // path to the saved TOML file after save
@@ -140,6 +141,7 @@ func NewBuilderView(theme styles.Theme, provider identity.Provider) BuilderView 
 	b.interfacesInput.Width = 40
 
 	b.addingTarget = true
+	b.editingIndex = -1
 	b.step2Focus = 0
 
 	return b
@@ -431,7 +433,11 @@ func (b *BuilderView) commitCurrentTarget() bool {
 		Interfaces: ifaces,
 	}
 
-	b.targets = append(b.targets, t)
+	if b.editingIndex >= 0 {
+		b.targets[b.editingIndex] = t
+	} else {
+		b.targets = append(b.targets, t)
+	}
 	b.err = ""
 	return true
 }
@@ -445,6 +451,7 @@ func (b BuilderView) updateStepTargets(msg tea.Msg) (BuilderView, tea.Cmd, Build
 				// If we have targets already, leave the form and show the list
 				if len(b.targets) > 0 {
 					b.addingTarget = false
+					b.editingIndex = -1
 					b.err = ""
 					return b, nil, BuilderActionNone
 				}
@@ -482,7 +489,12 @@ func (b BuilderView) updateStepTargets(msg tea.Msg) (BuilderView, tea.Cmd, Build
 				// On last field, commit this target and show list
 				if b.commitCurrentTarget() {
 					b.addingTarget = false
-					b.targetCursor = len(b.targets) - 1
+					if b.editingIndex >= 0 {
+						b.targetCursor = b.editingIndex
+					} else {
+						b.targetCursor = len(b.targets) - 1
+					}
+					b.editingIndex = -1
 				}
 				return b, nil, BuilderActionNone
 			}
@@ -514,6 +526,37 @@ func (b BuilderView) updateStepTargets(msg tea.Msg) (BuilderView, tea.Cmd, Build
 				b.interfacesInput, cmd = b.interfacesInput.Update(msg)
 			}
 			return b, cmd, BuilderActionNone
+
+		case msg.String() == "e":
+			if !b.addingTarget && len(b.targets) > 0 {
+				t := b.targets[b.targetCursor]
+				b.editingIndex = b.targetCursor
+				b.hostInput.SetValue(t.Host)
+				b.labelInput.SetValue(t.Label)
+				b.targetIdentity.SetValue(t.Identity)
+				b.interfacesInput.SetValue(strings.Join(t.Interfaces, ", "))
+				b.addingTarget = true
+				b.step2Focus = 0
+				b.hostInput.Focus()
+				b.labelInput.Blur()
+				b.targetIdentity.Blur()
+				b.interfacesInput.Blur()
+				return b, nil, BuilderActionNone
+			}
+			if b.addingTarget {
+				var cmd tea.Cmd
+				switch b.step2Focus {
+				case 0:
+					b.hostInput, cmd = b.hostInput.Update(msg)
+				case 1:
+					b.labelInput, cmd = b.labelInput.Update(msg)
+				case 2:
+					b.targetIdentity, cmd = b.targetIdentity.Update(msg)
+				case 3:
+					b.interfacesInput, cmd = b.interfacesInput.Update(msg)
+				}
+				return b, cmd, BuilderActionNone
+			}
 
 		case msg.String() == "d":
 			if !b.addingTarget && len(b.targets) > 0 {
@@ -612,7 +655,11 @@ func (b BuilderView) viewStepTargets() string {
 		subTitle := lipgloss.NewStyle().
 			Foreground(b.theme.Base0E).
 			Bold(true)
-		s.WriteString("  " + subTitle.Render("Add Target") + "\n\n")
+		formTitle := "Add Target"
+		if b.editingIndex >= 0 {
+			formTitle = "Edit Target"
+		}
+		s.WriteString("  " + subTitle.Render(formTitle) + "\n\n")
 
 		type field struct {
 			label string
@@ -723,8 +770,9 @@ func (b BuilderView) renderStep2Help() string {
 	}
 
 	return helpStyle.Render(fmt.Sprintf(
-		"%s add  %s delete  %s/%s select  %s proceed  %s back",
+		"%s add  %s edit  %s delete  %s/%s select  %s proceed  %s back",
 		keyStyle.Render("[a]"),
+		keyStyle.Render("[e]"),
 		keyStyle.Render("[d]"),
 		keyStyle.Render("[up]"),
 		keyStyle.Render("[down]"),

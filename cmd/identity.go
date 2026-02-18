@@ -45,6 +45,7 @@ func identityCmd(args []string) {
 }
 
 // openStore opens the identity store, prompting for the master password if needed.
+// Tries empty password first to support no-password vaults.
 func openStore() *identity.FileStore {
 	storePath, err := config.GetIdentityStorePath()
 	if err != nil {
@@ -57,10 +58,17 @@ func openStore() *identity.FileStore {
 		os.Exit(1)
 	}
 
+	// Try empty password first (no-password vault)
+	store, storeErr := identity.NewFileStore(storePath, []byte(""))
+	if storeErr == nil {
+		return store
+	}
+
+	// Empty password didn't work, try env var or prompt
 	password := getMasterPassword()
-	store, err := identity.NewFileStore(storePath, password)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error opening identity store: %v\n", err)
+	store, storeErr = identity.NewFileStore(storePath, password)
+	if storeErr != nil {
+		fmt.Fprintf(os.Stderr, "Error opening identity store: %v\n", storeErr)
 		os.Exit(1)
 	}
 	return store

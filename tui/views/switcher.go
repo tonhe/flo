@@ -68,7 +68,7 @@ func (v *SwitcherView) Refresh(dashDir string, mgr *engine.Manager) {
 		return
 	}
 
-	runningEngines := mgr.ListEngines()
+	runningEngines := mgr.TryListEngines()
 	runningMap := make(map[string]engine.EngineInfo, len(runningEngines))
 	for _, info := range runningEngines {
 		runningMap[info.Name] = info
@@ -204,35 +204,23 @@ func (v SwitcherView) View() string {
 		helpStyle.Render(help),
 	)
 
-	// Modal box with rounded border
-	modal := v.sty.ModalBorder.
-		Width(innerWidth).
-		Render(content)
+	// Render modal body without a top border
+	noTopBorder := v.sty.ModalBorder.BorderTop(false)
+	modalBody := noTopBorder.Width(innerWidth).Render(content)
 
-	// Title rendered into the border top
-	title := v.sty.ModalTitle.Render(" Dashboards ")
-	modal = lipgloss.JoinVertical(lipgloss.Left, modal)
+	// Build top border manually with embedded title
+	borderFg := lipgloss.NewStyle().Foreground(v.theme.Base0D).Background(v.theme.Base00)
+	titleText := " Dashboards "
+	titleRendered := v.sty.ModalTitle.Render(titleText)
 
-	// Place the title over the top border
-	modalLines := strings.Split(modal, "\n")
-	if len(modalLines) > 0 {
-		borderLine := modalLines[0]
-		// Insert the title after the first border character
-		if len(borderLine) > 2 {
-			runes := []rune(borderLine)
-			titleRunes := []rune(title)
-			// Place title starting at position 2 (after corner + one border char)
-			insertPos := 2
-			if insertPos+len(titleRunes) < len(runes) {
-				combined := make([]rune, 0, len(runes))
-				combined = append(combined, runes[:insertPos]...)
-				combined = append(combined, titleRunes...)
-				combined = append(combined, runes[insertPos+len(titleRunes):]...)
-				modalLines[0] = string(combined)
-			}
-		}
-		modal = strings.Join(modalLines, "\n")
+	fullWidth := lipgloss.Width(modalBody)
+	rightDashes := fullWidth - 2 - 1 - len(titleText) // corners(2) + one dash + title visual width
+	if rightDashes < 0 {
+		rightDashes = 0
 	}
+	topBorder := borderFg.Render("╭─") + titleRendered + borderFg.Render(strings.Repeat("─", rightDashes)+"╮")
+
+	modal := topBorder + "\n" + modalBody
 
 	// Center the modal in the available space
 	return lipgloss.Place(v.width, v.height, lipgloss.Center, lipgloss.Center, modal)

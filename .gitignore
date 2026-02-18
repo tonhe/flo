@@ -1,5 +1,6 @@
 # Binaries
 flo
+dist/
 *.exe
 *.dll
 *.so

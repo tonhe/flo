@@ -4,7 +4,7 @@ VERSION := 0.1.0
 BUILD   := $(shell date +%m%d%Y.%H%M)
 LDFLAGS := -s -w -X github.com/tonhe/flo/internal/version.Version=$(VERSION) -X github.com/tonhe/flo/internal/version.Build=$(BUILD)
 
-.PHONY: build clean install
+.PHONY: build clean install release-dry-run
 
 build:
 	go build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $(BINARY) .
@@ -15,3 +15,6 @@ clean:
 install: build
 	mkdir -p ~/bin
 	cp $(BINARY) ~/bin/$(BINARY)
+
+release-dry-run:
+	goreleaser release --snapshot --clean

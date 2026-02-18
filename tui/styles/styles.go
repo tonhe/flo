@@ -115,6 +115,8 @@ func NewStyles(theme Theme) *Styles {
 		ModalBorder: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(theme.Base0D).
+			BorderBackground(theme.Base00).
+			Background(theme.Base00).
 			Padding(1, 2),
 		ModalTitle: lipgloss.NewStyle().
 			Foreground(theme.Base0D).

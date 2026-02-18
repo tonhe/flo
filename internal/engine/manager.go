@@ -67,6 +67,31 @@ func (m *Manager) GetSnapshot(name string) (*DashboardSnapshot, error) {
 	return p.Snapshot(), nil
 }
 
+// TryGetSnapshot returns a snapshot without blocking the poller's write lock.
+// Returns nil if the engine is not found or no snapshot is available yet.
+func (m *Manager) TryGetSnapshot(name string) *DashboardSnapshot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	p, ok := m.engines[name]
+	if !ok {
+		return nil
+	}
+	return p.TrySnapshot()
+}
+
+// TryListEngines returns summary info for all engines without blocking.
+func (m *Manager) TryListEngines() []EngineInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	infos := make([]EngineInfo, 0, len(m.engines))
+	for _, p := range m.engines {
+		infos = append(infos, p.TryInfo())
+	}
+	return infos
+}
+
 // Subscribe returns a channel that receives events for the named dashboard.
 func (m *Manager) Subscribe(name string) (<-chan EngineEvent, error) {
 	m.mu.RLock()

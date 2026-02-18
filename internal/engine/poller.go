@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gosnmp/gosnmp"
@@ -25,6 +26,7 @@ type Poller struct {
 	pollCount    int
 	errorCount   int
 	lastPoll     time.Time
+	cachedSnap   atomic.Pointer[DashboardSnapshot]
 }
 
 // NewPoller creates a Poller for the given dashboard and identity provider.
@@ -334,6 +336,38 @@ func (p *Poller) Snapshot() *DashboardSnapshot {
 	return p.snapshotLocked()
 }
 
+// TrySnapshot returns a snapshot without blocking. If the write lock is held
+// (e.g. during a poll cycle), it returns the most recent cached snapshot.
+// This is safe to call from the UI goroutine without risking a freeze.
+func (p *Poller) TrySnapshot() *DashboardSnapshot {
+	if p.mu.TryRLock() {
+		snap := p.snapshotLocked()
+		p.mu.RUnlock()
+		return snap
+	}
+	return p.cachedSnap.Load()
+}
+
+// TryInfo returns engine info without blocking. If the write lock is held,
+// it returns minimal info (name + running state) to avoid freezing the UI.
+func (p *Poller) TryInfo() EngineInfo {
+	if p.mu.TryRLock() {
+		info := EngineInfo{
+			Name:       p.dash.Name,
+			State:      EngineRunning,
+			LastPoll:   p.lastPoll,
+			PollCount:  p.pollCount,
+			ErrorCount: p.errorCount,
+		}
+		p.mu.RUnlock()
+		return info
+	}
+	return EngineInfo{
+		Name:  p.dash.Name,
+		State: EngineRunning,
+	}
+}
+
 // snapshotLocked builds a DashboardSnapshot without acquiring any lock.
 // The caller must hold at least a read lock on p.mu.
 func (p *Poller) snapshotLocked() *DashboardSnapshot {
@@ -364,10 +398,12 @@ func (p *Poller) Subscribe() <-chan EngineEvent {
 	return ch
 }
 
-// notify sends the current snapshot to all subscribers (non-blocking).
+// notify sends the current snapshot to all subscribers (non-blocking)
+// and caches the snapshot for lock-free reads.
 // Must be called while holding the write lock on p.mu.
 func (p *Poller) notify() {
 	snap := p.snapshotLocked()
+	p.cachedSnap.Store(snap)
 	event := EngineEvent{DashboardName: p.dash.Name, Snapshot: snap}
 	for _, ch := range p.subscribers {
 		select {

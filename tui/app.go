@@ -139,11 +139,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case TickMsg:
-		// Refresh snapshot from the engine manager
+		// Refresh snapshot without blocking — if a poll cycle holds the
+		// write lock, we use the most recent cached snapshot instead of
+		// freezing the entire Bubble Tea event loop.
 		if m.activeDash != "" {
-			if snap, err := m.manager.GetSnapshot(m.activeDash); err == nil {
+			if snap := m.manager.TryGetSnapshot(m.activeDash); snap != nil {
 				m.dashboard.SetSnapshot(snap)
-				// If viewing detail, refresh the selected interface data
 				if m.state == StateDetail {
 					label, iface := m.dashboard.SelectedInterface()
 					if iface != nil {
@@ -231,7 +232,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Force refresh on 'r'
 			if key.Matches(msg, keys.DefaultKeyMap.Refresh) {
 				if m.activeDash != "" {
-					if snap, err := m.manager.GetSnapshot(m.activeDash); err == nil {
+					if snap := m.manager.TryGetSnapshot(m.activeDash); snap != nil {
 						m.dashboard.SetSnapshot(snap)
 					}
 				}
@@ -466,7 +467,7 @@ func (m *AppModel) editActiveDashboard() {
 
 // tryQuit either quits immediately (no engines running) or shows a confirmation dialog.
 func (m AppModel) tryQuit() (tea.Model, tea.Cmd) {
-	if len(m.manager.ListEngines()) == 0 {
+	if len(m.manager.TryListEngines()) == 0 {
 		return m, tea.Quit
 	}
 	m.confirmQuit = true
@@ -501,8 +502,8 @@ func (m AppModel) View() string {
 		return "Loading..."
 	}
 
-	// Header bar
-	engineList := m.manager.ListEngines()
+	// Header bar (non-blocking to avoid freezing during poll cycles)
+	engineList := m.manager.TryListEngines()
 	header := components.RenderHeader(
 		m.theme,
 		m.activeDash,
@@ -536,12 +537,12 @@ func (m AppModel) View() string {
 		body = "View not implemented"
 	}
 
-	// Gather status bar metrics
+	// Gather status bar metrics (non-blocking)
 	var lastPoll time.Time
 	var interval time.Duration
 	okCount, totalCount := 0, 0
 	if m.activeDash != "" {
-		if snap, err := m.manager.GetSnapshot(m.activeDash); err == nil {
+		if snap := m.manager.TryGetSnapshot(m.activeDash); snap != nil {
 			lastPoll = snap.LastPoll
 			for _, g := range snap.Groups {
 				for _, t := range g.Targets {
