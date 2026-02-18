@@ -56,7 +56,8 @@ const (
 )
 
 // IdentityPickerModel is a modal overlay for selecting or creating an identity.
-// List mode is implemented here; form mode fields are reserved for Task 2.
+// It operates in two modes: list selection (pickerModeList) and inline creation
+// form (pickerModeForm).
 type IdentityPickerModel struct {
 	theme    styles.Theme
 	sty      *styles.Styles
@@ -74,7 +75,7 @@ type IdentityPickerModel struct {
 	// Selected result (populated on PickerSelected)
 	selectedName string
 
-	// Form mode state (reserved for Task 2)
+	// Form mode state
 	formFields  []textinput.Model
 	formFocus   int
 	formVersion string // current SNMP version
@@ -262,7 +263,7 @@ func (m IdentityPickerModel) View() string {
 	titleRendered := m.sty.ModalTitle.Render(titleText)
 
 	fullWidth := lipgloss.Width(modalBody)
-	rightDashes := fullWidth - 2 - 1 - len(titleText) // corners(2) + one dash + title visual width
+	rightDashes := fullWidth - 2 - 1 - lipgloss.Width(titleRendered)
 	if rightDashes < 0 {
 		rightDashes = 0
 	}
@@ -759,7 +760,7 @@ func (m IdentityPickerModel) viewForm() string {
 	titleRendered := m.sty.ModalTitle.Render(titleText)
 
 	fullWidth := lipgloss.Width(modalBody)
-	rightDashes := fullWidth - 2 - 1 - len(titleText)
+	rightDashes := fullWidth - 2 - 1 - lipgloss.Width(titleRendered)
 	if rightDashes < 0 {
 		rightDashes = 0
 	}
