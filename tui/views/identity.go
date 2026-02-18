@@ -22,6 +22,8 @@ const (
 	IdentityList IdentityMode = iota
 	// IdentityForm shows the add/edit form.
 	IdentityForm
+	// IdentitySetup shows the first-time store creation form.
+	IdentitySetup
 )
 
 // SNMP version options for cycling.
@@ -67,6 +69,13 @@ type IdentityView struct {
 	formAuth    string // current auth protocol selection
 	formPriv    string // current priv protocol selection
 	err         string
+
+	// Setup state (first-time store creation)
+	setupPass    textinput.Model
+	setupConfirm textinput.Model
+	setupFocus   int
+	storePath    string
+	OnStoreCreated func(identity.Provider) // callback to update app provider
 }
 
 // NewIdentityView creates a new IdentityView with the given theme and provider.
@@ -84,6 +93,36 @@ func (v *IdentityView) SetProvider(provider identity.Provider) {
 	v.provider = provider
 }
 
+// SetStorePath sets the path for creating a new identity store.
+func (v *IdentityView) SetStorePath(path string) {
+	v.storePath = path
+}
+
+// SetOnStoreCreated sets the callback invoked after a new store is created.
+func (v *IdentityView) SetOnStoreCreated(fn func(identity.Provider)) {
+	v.OnStoreCreated = fn
+}
+
+// initSetup prepares the setup mode for first-time store creation.
+func (v *IdentityView) initSetup() {
+	v.mode = IdentitySetup
+	v.err = ""
+	v.setupFocus = 0
+
+	v.setupPass = textinput.New()
+	v.setupPass.Placeholder = "master password (blank for none)"
+	v.setupPass.CharLimit = 128
+	v.setupPass.Width = 40
+	v.setupPass.EchoMode = textinput.EchoPassword
+	v.setupPass.Focus()
+
+	v.setupConfirm = textinput.New()
+	v.setupConfirm.Placeholder = "confirm password"
+	v.setupConfirm.CharLimit = 128
+	v.setupConfirm.Width = 40
+	v.setupConfirm.EchoMode = textinput.EchoPassword
+}
+
 // SetSize updates the available dimensions for the view.
 func (v *IdentityView) SetSize(width, height int) {
 	v.width = width
@@ -94,7 +133,11 @@ func (v *IdentityView) SetSize(width, height int) {
 func (v *IdentityView) Refresh() {
 	v.err = ""
 	if v.provider == nil {
-		v.summaries = nil
+		if v.storePath != "" {
+			v.initSetup()
+		} else {
+			v.summaries = nil
+		}
 		return
 	}
 	sums, err := v.provider.List()
@@ -103,7 +146,6 @@ func (v *IdentityView) Refresh() {
 		v.summaries = nil
 		return
 	}
-	// Sort summaries by name for stable display order.
 	sort.Slice(sums, func(i, j int) bool {
 		return sums[i].Name < sums[j].Name
 	})
@@ -124,6 +166,8 @@ func (v IdentityView) Update(msg tea.Msg) (IdentityView, tea.Cmd, bool) {
 		return v.updateList(msg)
 	case IdentityForm:
 		return v.updateForm(msg)
+	case IdentitySetup:
+		return v.updateSetup(msg)
 	}
 	return v, nil, false
 }
@@ -133,6 +177,8 @@ func (v IdentityView) View() string {
 	switch v.mode {
 	case IdentityForm:
 		return v.viewForm()
+	case IdentitySetup:
+		return v.viewSetup()
 	default:
 		return v.viewList()
 	}
@@ -317,6 +363,127 @@ func (v IdentityView) renderListHelp() string {
 		keyStyle.Render("[d]"),
 		keyStyle.Render("[esc]"),
 	))
+}
+
+// --- Setup mode ---
+
+func (v IdentityView) updateSetup(msg tea.Msg) (IdentityView, tea.Cmd, bool) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, keys.DefaultKeyMap.Escape):
+			return v, nil, true
+
+		case msg.String() == "tab", msg.String() == "shift+tab":
+			if v.setupFocus == 0 {
+				v.setupFocus = 1
+				v.setupPass.Blur()
+				v.setupConfirm.Focus()
+			} else {
+				v.setupFocus = 0
+				v.setupConfirm.Blur()
+				v.setupPass.Focus()
+			}
+			return v, nil, false
+
+		case msg.String() == "enter":
+			if v.setupFocus == 0 {
+				v.setupFocus = 1
+				v.setupPass.Blur()
+				v.setupConfirm.Focus()
+				return v, nil, false
+			}
+			// Validate passwords match
+			pass := v.setupPass.Value()
+			confirm := v.setupConfirm.Value()
+			if pass != confirm {
+				v.err = "Passwords don't match"
+				return v, nil, false
+			}
+			// Create the store
+			store, err := identity.NewFileStore(v.storePath, []byte(pass))
+			if err != nil {
+				v.err = fmt.Sprintf("Failed to create store: %v", err)
+				return v, nil, false
+			}
+			v.provider = store
+			if v.OnStoreCreated != nil {
+				v.OnStoreCreated(store)
+			}
+			v.mode = IdentityList
+			v.err = ""
+			v.Refresh()
+			return v, nil, false
+
+		default:
+			var cmd tea.Cmd
+			if v.setupFocus == 0 {
+				v.setupPass, cmd = v.setupPass.Update(msg)
+			} else {
+				v.setupConfirm, cmd = v.setupConfirm.Update(msg)
+			}
+			return v, cmd, false
+		}
+	}
+	return v, nil, false
+}
+
+func (v IdentityView) viewSetup() string {
+	titleStyle := lipgloss.NewStyle().
+		Foreground(v.theme.Base0D).
+		Bold(true)
+	labelStyle := v.sty.FormLabel
+	activeLabelStyle := lipgloss.NewStyle().
+		Foreground(v.theme.Base0D).
+		Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(v.theme.Base04)
+	helpStyle := lipgloss.NewStyle().Foreground(v.theme.Base04)
+	keyStyle := lipgloss.NewStyle().Foreground(v.theme.Base0D).Bold(true)
+
+	var b strings.Builder
+
+	b.WriteString("\n")
+	b.WriteString("  " + titleStyle.Render("Identity Store Setup") + "\n")
+	b.WriteString("\n")
+	b.WriteString("  " + dimStyle.Render("No identity store found. Create one to store SNMP credentials.") + "\n")
+	b.WriteString("  " + dimStyle.Render("Leave password blank for a no-password vault.") + "\n")
+	b.WriteString("\n")
+
+	if v.err != "" {
+		errStyle := lipgloss.NewStyle().Foreground(v.theme.Base08)
+		b.WriteString("  " + errStyle.Render(v.err) + "\n\n")
+	}
+
+	type field struct {
+		label string
+		view  string
+	}
+	fields := []field{
+		{"Password", v.setupPass.View()},
+		{"Confirm", v.setupConfirm.View()},
+	}
+
+	for i, f := range fields {
+		isFocused := i == v.setupFocus
+		indicator := "  "
+		lbl := labelStyle
+		if isFocused {
+			indicatorStyle := lipgloss.NewStyle().Foreground(v.theme.Base0D).Bold(true)
+			indicator = indicatorStyle.Render("> ")
+			lbl = activeLabelStyle
+		}
+		b.WriteString(fmt.Sprintf("  %s%s%s\n", indicator, lbl.Render(padRight(f.label+":", 18)), f.view))
+	}
+
+	b.WriteString("\n")
+	b.WriteString("  " + helpStyle.Render(fmt.Sprintf(
+		"%s navigate  %s create  %s cancel",
+		keyStyle.Render("[tab]"),
+		keyStyle.Render("[enter]"),
+		keyStyle.Render("[esc]"),
+	)) + "\n")
+
+	return b.String()
 }
 
 // --- Form mode ---

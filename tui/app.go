@@ -51,12 +51,13 @@ type AppModel struct {
 	height     int
 	activeDash    string
 	startDashName string // auto-start dashboard from --dashboard flag
+	storePath     string
 }
 
 // NewAppModel creates a new AppModel with the given config, engine manager,
 // and identity provider. If startDash is non-empty, that dashboard will be
 // loaded and started automatically on Init.
-func NewAppModel(cfg *config.Config, mgr *engine.Manager, provider identity.Provider, startDash string) AppModel {
+func NewAppModel(cfg *config.Config, mgr *engine.Manager, provider identity.Provider, startDash string, storePath string) AppModel {
 	theme := styles.DefaultTheme
 	if t := styles.GetThemeByName(cfg.Theme); t != nil {
 		theme = *t
@@ -73,6 +74,7 @@ func NewAppModel(cfg *config.Config, mgr *engine.Manager, provider identity.Prov
 		identity:      views.NewIdentityView(theme, provider),
 		help:          views.NewHelpView(theme),
 		startDashName: startDash,
+		storePath:     storePath,
 	}
 }
 
@@ -185,6 +187,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Open the identity manager on 'i'
 			if key.Matches(msg, keys.DefaultKeyMap.Identity) {
 				m.identity.SetSize(m.width, m.height-3)
+				m.identity.SetStorePath(m.storePath)
+				m.identity.SetOnStoreCreated(func(p identity.Provider) {
+					m.provider = p
+				})
 				m.identity.Refresh()
 				m.state = StateIdentity
 				return m, nil

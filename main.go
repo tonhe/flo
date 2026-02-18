@@ -77,32 +77,41 @@ func main() {
 	}
 
 	// Open identity store if it exists.
-	// Prompt for master password unless FLO_MASTER_KEY env var is set.
 	var provider identity.Provider
 	storePath, err := config.GetIdentityStorePath()
-	if err == nil {
+	if err != nil {
+		storePath = ""
+	}
+	if storePath != "" {
 		if _, statErr := os.Stat(storePath); statErr == nil {
-			password := []byte(os.Getenv("FLO_MASTER_KEY"))
-			if len(password) == 0 {
-				fmt.Fprint(os.Stderr, "Master password: ")
-				password, err = term.ReadPassword(int(os.Stdin.Fd()))
-				fmt.Fprintln(os.Stderr) // newline after hidden input
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+			// Try empty password first
+			store, storeErr := identity.NewFileStore(storePath, []byte(""))
+			if storeErr == nil {
+				provider = store
+			} else {
+				// Empty password didn't work, try env var or prompt
+				password := []byte(os.Getenv("FLO_MASTER_KEY"))
+				if len(password) == 0 {
+					fmt.Fprint(os.Stderr, "Master password: ")
+					password, err = term.ReadPassword(int(os.Stdin.Fd()))
+					fmt.Fprintln(os.Stderr)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Error reading password: %v\n", err)
+						os.Exit(1)
+					}
+				}
+				store, storeErr = identity.NewFileStore(storePath, password)
+				if storeErr != nil {
+					fmt.Fprintf(os.Stderr, "Error opening identity store: %v\n", storeErr)
 					os.Exit(1)
 				}
+				provider = store
 			}
-			store, storeErr := identity.NewFileStore(storePath, password)
-			if storeErr != nil {
-				fmt.Fprintf(os.Stderr, "Error opening identity store: %v\n", storeErr)
-				os.Exit(1)
-			}
-			provider = store
 		}
 	}
 
 	mgr := engine.NewManager()
-	model := tui.NewAppModel(cfg, mgr, provider, dashboardFlag)
+	model := tui.NewAppModel(cfg, mgr, provider, dashboardFlag, storePath)
 
 	p := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
