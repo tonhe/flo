@@ -3,6 +3,8 @@ package cmd
 import (
 	"fmt"
 	"os"
+
+	"github.com/tonhe/flo/internal/version"
 )
 
 // knownSubcommands is the set of CLI subcommands that bypass the TUI.
@@ -36,7 +38,11 @@ func Execute(args []string) {
 	case "themes":
 		themesCmd()
 	case "version":
-		fmt.Println("flo v0.1.0")
+		fmt.Printf("flo v%s", version.Version)
+		if version.Build != "" {
+			fmt.Printf(" (%s)", version.Build)
+		}
+		fmt.Println()
 	case "help":
 		printUsage()
 	default:

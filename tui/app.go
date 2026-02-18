@@ -2,7 +2,6 @@ package tui
 
 import (
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -12,6 +11,7 @@ import (
 	"github.com/tonhe/flo/internal/dashboard"
 	"github.com/tonhe/flo/internal/engine"
 	"github.com/tonhe/flo/internal/identity"
+	"github.com/tonhe/flo/internal/version"
 	"github.com/tonhe/flo/tui/components"
 	"github.com/tonhe/flo/tui/keys"
 	"github.com/tonhe/flo/tui/styles"
@@ -131,7 +131,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.identity.SetSize(msg.Width, bodyHeight)
 		m.builder.SetSize(msg.Width, bodyHeight)
 		m.settings.SetSize(msg.Width, bodyHeight)
-		m.help.SetSize(msg.Width, msg.Height)
+		m.help.SetSize(msg.Width, bodyHeight)
 		return m, nil
 
 	case TickMsg:
@@ -165,7 +165,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.manager.StopAll()
 			return m, tea.Quit
 		case key.Matches(msg, keys.DefaultKeyMap.Help):
-			m.help.SetSize(m.width, m.height)
+			bodyHeight := m.height - 3
+			if bodyHeight < 1 {
+				bodyHeight = 1
+			}
+			m.help.SetSize(m.width, bodyHeight)
 			m.help.Toggle()
 			return m, nil
 		}
@@ -430,6 +434,8 @@ func (m AppModel) View() string {
 		len(engineList),
 		len(engineList),
 		m.width,
+		version.Version,
+		version.Build,
 	)
 
 	// Body content based on current state
@@ -486,70 +492,22 @@ func (m AppModel) View() string {
 		Background(m.theme.Base00).
 		Foreground(m.theme.Base05)
 
-	full := lipgloss.JoinVertical(lipgloss.Left, header, bodyStyle.Render(body), statusBar)
-
-	// When the switcher is active, overlay it on top of the composed screen.
-	if m.state == StateSwitcher {
-		overlay := m.switcher.View()
-		full = overlayCenter(full, overlay, m.width, m.height)
-	}
-
-	// Help overlay renders on top of everything.
+	// When a modal is active, use its already-centered output as the body
+	// instead of overlaying on top of the full screen. Both switcher and help
+	// call lipgloss.Place() internally, so their output is already sized to
+	// width x bodyHeight.
 	if m.help.IsVisible() {
-		overlay := m.help.View()
-		full = overlayCenter(full, overlay, m.width, m.height)
+		modalBody := m.help.View()
+		full := lipgloss.JoinVertical(lipgloss.Left, header, modalBody, statusBar)
+		return full
+	}
+	if m.state == StateSwitcher {
+		modalBody := m.switcher.View()
+		full := lipgloss.JoinVertical(lipgloss.Left, header, modalBody, statusBar)
+		return full
 	}
 
+	full := lipgloss.JoinVertical(lipgloss.Left, header, bodyStyle.Render(body), statusBar)
 	return full
 }
 
-// overlayCenter composites the overlay string on top of the background string,
-// centering the overlay within the given width and height. Non-space characters
-// in the overlay replace the corresponding characters in the background.
-func overlayCenter(bg, fg string, width, height int) string {
-	bgLines := strings.Split(bg, "\n")
-	fgLines := strings.Split(fg, "\n")
-
-	// Pad background to full height if needed
-	for len(bgLines) < height {
-		bgLines = append(bgLines, strings.Repeat(" ", width))
-	}
-
-	// Calculate vertical offset to center the overlay
-	yOff := (height - len(fgLines)) / 2
-	if yOff < 0 {
-		yOff = 0
-	}
-
-	for i, fgLine := range fgLines {
-		bgIdx := yOff + i
-		if bgIdx >= len(bgLines) {
-			break
-		}
-
-		bgRunes := []rune(bgLines[bgIdx])
-		fgRunes := []rune(fgLine)
-
-		// Calculate horizontal offset to center this line
-		xOff := (width - len(fgRunes)) / 2
-		if xOff < 0 {
-			xOff = 0
-		}
-
-		// Ensure the background line is wide enough
-		for len(bgRunes) < width {
-			bgRunes = append(bgRunes, ' ')
-		}
-
-		// Overlay foreground onto background
-		for j, r := range fgRunes {
-			pos := xOff + j
-			if pos < len(bgRunes) {
-				bgRunes[pos] = r
-			}
-		}
-		bgLines[bgIdx] = string(bgRunes)
-	}
-
-	return strings.Join(bgLines, "\n")
-}

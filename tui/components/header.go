@@ -9,9 +9,10 @@ import (
 
 // RenderHeader renders the top header bar with app name, dashboard name,
 // live/stopped status, and engine count.
-func RenderHeader(theme styles.Theme, dashName string, isLive bool, activeCount, totalCount, width int) string {
+func RenderHeader(theme styles.Theme, dashName string, isLive bool, activeCount, totalCount, width int, ver, build string) string {
 	left := lipgloss.NewStyle().
 		Foreground(theme.Base0D).
+		Background(theme.Base01).
 		Bold(true).
 		Render("flo")
 
@@ -21,6 +22,7 @@ func RenderHeader(theme styles.Theme, dashName string, isLive bool, activeCount,
 	}
 	center := lipgloss.NewStyle().
 		Foreground(theme.Base05).
+		Background(theme.Base01).
 		Render(displayName)
 
 	status := "STOPPED"
@@ -31,13 +33,24 @@ func RenderHeader(theme styles.Theme, dashName string, isLive bool, activeCount,
 	}
 	right := lipgloss.NewStyle().
 		Foreground(statusColor).
+		Background(theme.Base01).
 		Render(status)
 
 	engines := lipgloss.NewStyle().
 		Foreground(theme.Base04).
+		Background(theme.Base01).
 		Render(fmt.Sprintf("%d/%d engines", activeCount, totalCount))
 
-	content := fmt.Sprintf(" %s  |  %s  |  %s  |  %s ", left, center, right, engines)
+	versionStr := "v" + ver
+	if build != "" {
+		versionStr += "  " + build
+	}
+	versionSeg := lipgloss.NewStyle().
+		Foreground(theme.Base04).
+		Background(theme.Base01).
+		Render(versionStr)
+
+	content := fmt.Sprintf(" %s  |  %s  |  %s  |  %s  |  %s ", left, center, right, engines, versionSeg)
 
 	return lipgloss.NewStyle().
 		Background(theme.Base01).
