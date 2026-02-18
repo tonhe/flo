@@ -13,6 +13,7 @@ import (
 	"github.com/tonhe/flo/internal/config"
 	"github.com/tonhe/flo/internal/dashboard"
 	"github.com/tonhe/flo/internal/identity"
+	"github.com/tonhe/flo/tui/components"
 	"github.com/tonhe/flo/tui/keys"
 	"github.com/tonhe/flo/tui/styles"
 )
@@ -90,6 +91,10 @@ type EditorView struct {
 
 	identities []string
 
+	showPicker   bool
+	picker       components.IdentityPickerModel
+	pickerTarget string // "settings", "host", or "addhost"
+
 	addHostBaseLen int // target count before add-host started
 
 	SavedPath string
@@ -138,6 +143,39 @@ func (e *EditorView) SetSize(width, height int) {
 
 // Update handles messages for the editor and dispatches by mode.
 func (e EditorView) Update(msg tea.Msg) (EditorView, tea.Cmd, EditorAction) {
+	if e.showPicker {
+		var cmd tea.Cmd
+		var action components.PickerAction
+		e.picker, cmd, action = e.picker.Update(msg)
+		switch action {
+		case components.PickerSelected:
+			name := e.picker.SelectedName()
+			switch e.pickerTarget {
+			case "settings":
+				e.defaultIdentity = name
+			case "host":
+				e.targets[e.detailHostIdx].Identity = name
+			case "addhost":
+				e.targets[len(e.targets)-1].Identity = name
+				e.detailCur = 3
+				e.input.SetValue("")
+				e.input.Placeholder = "Gi0/0, Gi0/1, Eth1"
+				e.editingWhat = "Interfaces (comma-separated)"
+			}
+			e.showPicker = false
+			if e.provider != nil {
+				e.identities = nil
+				if sums, listErr := e.provider.List(); listErr == nil {
+					for _, s := range sums {
+						e.identities = append(e.identities, s.Name)
+					}
+				}
+			}
+		case components.PickerCancelled:
+			e.showPicker = false
+		}
+		return e, cmd, EditorActionNone
+	}
 	switch e.mode {
 	case modeMenu:
 		return e.updateMenu(msg)
@@ -228,6 +266,13 @@ func (e *EditorView) syncCursorFromGlobal() {
 // --- Inline edit for settings fields ---
 
 func (e *EditorView) startInlineEdit() {
+	if e.settingsCur == edSettingsIdentity {
+		e.picker = components.NewIdentityPickerModel(e.theme, e.provider)
+		e.picker.SetSize(e.width, e.height)
+		e.showPicker = true
+		e.pickerTarget = "settings"
+		return
+	}
 	e.mode = modeInlineEdit
 	e.input = textinput.New()
 	e.input.CharLimit = 128
@@ -237,9 +282,6 @@ func (e *EditorView) startInlineEdit() {
 	case edSettingsName:
 		e.input.SetValue(e.dashName)
 		e.editingWhat = "Dashboard Name"
-	case edSettingsIdentity:
-		e.input.SetValue(e.defaultIdentity)
-		e.editingWhat = "Default Identity"
 	case edSettingsInterval:
 		e.input.SetValue(e.intervalStr)
 		e.editingWhat = "Poll Interval"
@@ -334,6 +376,13 @@ func (e EditorView) updateHostDetail(msg tea.Msg) (EditorView, tea.Cmd, EditorAc
 }
 
 func (e *EditorView) startHostInlineEdit() {
+	if e.detailCur == edHostFieldIdentity {
+		e.picker = components.NewIdentityPickerModel(e.theme, e.provider)
+		e.picker.SetSize(e.width, e.height)
+		e.showPicker = true
+		e.pickerTarget = "host"
+		return
+	}
 	e.mode = modeHostInline
 	e.input = textinput.New()
 	e.input.CharLimit = 256
@@ -347,9 +396,6 @@ func (e *EditorView) startHostInlineEdit() {
 	case e.detailCur == edHostFieldLabel:
 		e.input.SetValue(target.Label)
 		e.editingWhat = "Label"
-	case e.detailCur == edHostFieldIdentity:
-		e.input.SetValue(target.Identity)
-		e.editingWhat = "Identity"
 	default:
 		ifIdx := e.detailCur - edHostFieldInterfaces
 		if ifIdx < len(target.Interfaces) {
@@ -449,11 +495,11 @@ func (e EditorView) updateAddHost(msg tea.Msg) (EditorView, tea.Cmd, EditorActio
 				e.input.Placeholder = "identity override (optional)"
 				e.editingWhat = "Identity"
 			case 2:
-				e.targets[len(e.targets)-1].Identity = val
-				e.detailCur = 3
-				e.input.SetValue("")
-				e.input.Placeholder = "Gi0/0, Gi0/1, Eth1"
-				e.editingWhat = "Interfaces (comma-separated)"
+				e.picker = components.NewIdentityPickerModel(e.theme, e.provider)
+				e.picker.SetSize(e.width, e.height)
+				e.showPicker = true
+				e.pickerTarget = "addhost"
+				return e, nil, EditorActionNone
 			case 3:
 				if val == "" {
 					e.err = "At least one interface is required"
@@ -537,6 +583,9 @@ func (e *EditorView) save() error {
 
 // View renders the editor based on the current mode.
 func (e EditorView) View() string {
+	if e.showPicker {
+		return e.picker.View()
+	}
 	switch e.mode {
 	case modeMenu, modeInlineEdit:
 		return e.viewMenu()
