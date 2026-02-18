@@ -52,6 +52,7 @@ type AppModel struct {
 	activeDash    string
 	startDashName string // auto-start dashboard from --dashboard flag
 	storePath     string
+	confirmQuit   bool
 }
 
 // NewAppModel creates a new AppModel with the given config, engine manager,
@@ -159,11 +160,23 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Confirm-to-quit dialog intercepts all keys when visible
+		if m.confirmQuit {
+			switch msg.String() {
+			case "y":
+				m.manager.StopAll()
+				return m, tea.Quit
+			case "n", "esc":
+				m.confirmQuit = false
+				return m, nil
+			}
+			return m, nil
+		}
+
 		// Global key bindings
 		switch {
 		case key.Matches(msg, keys.DefaultKeyMap.Quit):
-			m.manager.StopAll()
-			return m, tea.Quit
+			return m.tryQuit()
 		case key.Matches(msg, keys.DefaultKeyMap.Help):
 			bodyHeight := m.height - 3
 			if bodyHeight < 1 {
@@ -179,8 +192,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case StateDashboard:
 			// 'q' to quit (only in dashboard, not in text-input views)
 			if msg.String() == "q" {
-				m.manager.StopAll()
-				return m, tea.Quit
+				return m.tryQuit()
 			}
 			// Open the dashboard switcher on 'd'
 			if key.Matches(msg, keys.DefaultKeyMap.Dashboard) {
@@ -236,6 +248,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 
 		case StateDetail:
+			if msg.String() == "q" {
+				return m.tryQuit()
+			}
 			var cmd tea.Cmd
 			var goBack bool
 			m.detail, cmd, goBack = m.detail.Update(msg)
@@ -256,6 +271,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 
 		case StateSwitcher:
+			if msg.String() == "q" {
+				return m.tryQuit()
+			}
 			var cmd tea.Cmd
 			var action views.SwitcherAction
 			m.switcher, cmd, action = m.switcher.Update(msg)
@@ -419,6 +437,37 @@ func (m *AppModel) editActiveDashboard() {
 	}
 }
 
+// tryQuit either quits immediately (no engines running) or shows a confirmation dialog.
+func (m AppModel) tryQuit() (tea.Model, tea.Cmd) {
+	if len(m.manager.ListEngines()) == 0 {
+		return m, tea.Quit
+	}
+	m.confirmQuit = true
+	return m, nil
+}
+
+// renderQuitConfirm renders the quit confirmation modal dialog.
+func (m AppModel) renderQuitConfirm() string {
+	bodyHeight := m.height - 3
+	if bodyHeight < 1 {
+		bodyHeight = 1
+	}
+	sty := styles.NewStyles(m.theme)
+	textStyle := lipgloss.NewStyle().Foreground(m.theme.Base05)
+	keyStyle := lipgloss.NewStyle().Foreground(m.theme.Base0D).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(m.theme.Base04)
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		textStyle.Render("Engines are still running."),
+		textStyle.Render("Quit anyway?"),
+		"",
+		dimStyle.Render(keyStyle.Render("[y]")+" yes    "+keyStyle.Render("[n]")+" no"),
+	)
+
+	modal := sty.ModalBorder.Width(36).Render(content)
+	return lipgloss.Place(m.width, bodyHeight, lipgloss.Center, lipgloss.Center, modal)
+}
+
 // View renders the full application UI by composing header, body, and status.
 func (m AppModel) View() string {
 	if m.width == 0 {
@@ -496,6 +545,11 @@ func (m AppModel) View() string {
 	// instead of overlaying on top of the full screen. Both switcher and help
 	// call lipgloss.Place() internally, so their output is already sized to
 	// width x bodyHeight.
+	if m.confirmQuit {
+		modalBody := m.renderQuitConfirm()
+		full := lipgloss.JoinVertical(lipgloss.Left, header, modalBody, statusBar)
+		return full
+	}
 	if m.help.IsVisible() {
 		modalBody := m.help.View()
 		full := lipgloss.JoinVertical(lipgloss.Left, header, modalBody, statusBar)
