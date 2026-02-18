@@ -547,17 +547,17 @@ func (m AppModel) View() string {
 	// width x bodyHeight.
 	if m.confirmQuit {
 		modalBody := m.renderQuitConfirm()
-		full := lipgloss.JoinVertical(lipgloss.Left, header, modalBody, statusBar)
+		full := lipgloss.JoinVertical(lipgloss.Left, header, bodyStyle.Render(modalBody), statusBar)
 		return full
 	}
 	if m.help.IsVisible() {
 		modalBody := m.help.View()
-		full := lipgloss.JoinVertical(lipgloss.Left, header, modalBody, statusBar)
+		full := lipgloss.JoinVertical(lipgloss.Left, header, bodyStyle.Render(modalBody), statusBar)
 		return full
 	}
 	if m.state == StateSwitcher {
 		modalBody := m.switcher.View()
-		full := lipgloss.JoinVertical(lipgloss.Left, header, modalBody, statusBar)
+		full := lipgloss.JoinVertical(lipgloss.Left, header, bodyStyle.Render(modalBody), statusBar)
 		return full
 	}
 
