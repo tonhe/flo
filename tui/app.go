@@ -28,6 +28,7 @@ const (
 	StateIdentity
 	StateBuilder
 	StateSettings
+	StateEditor
 )
 
 // TickMsg triggers a periodic UI refresh to pick up new poll data.
@@ -45,6 +46,7 @@ type AppModel struct {
 	detail     views.DetailView
 	identity   views.IdentityView
 	builder    views.BuilderView
+	editor     views.EditorView
 	settings   views.SettingsView
 	help       views.HelpView
 	width      int
@@ -131,6 +133,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detail.SetSize(msg.Width, bodyHeight)
 		m.identity.SetSize(msg.Width, bodyHeight)
 		m.builder.SetSize(msg.Width, bodyHeight)
+		m.editor.SetSize(msg.Width, bodyHeight)
 		m.settings.SetSize(msg.Width, bodyHeight)
 		m.help.SetSize(msg.Width, bodyHeight)
 		return m, nil
@@ -367,6 +370,30 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, cmd
+
+		case StateEditor:
+			var cmd tea.Cmd
+			var action views.EditorAction
+			m.editor, cmd, action = m.editor.Update(msg)
+			switch action {
+			case views.EditorActionSaved:
+				path := m.editor.SavedPath
+				if dash, loadErr := dashboard.LoadDashboard(path); loadErr == nil {
+					if m.activeDash != "" {
+						_ = m.manager.Stop(m.activeDash)
+					}
+					if m.provider != nil {
+						_ = m.manager.Start(dash, m.provider)
+					}
+					m.activeDash = dash.Name
+				}
+				m.state = StateDashboard
+				return m, nil
+			case views.EditorActionClose:
+				m.state = StateDashboard
+				return m, nil
+			}
+			return m, cmd
 		}
 	}
 	return m, nil
@@ -405,16 +432,16 @@ func (m *AppModel) switchToDashboard(item *views.SwitcherItem) {
 	m.activeDash = dash.Name
 }
 
-// editDashboard loads a dashboard TOML and opens it in the builder for editing.
+// editDashboard loads a dashboard TOML and opens it in the editor for editing.
 func (m *AppModel) editDashboard(path string) {
 	dash, err := dashboard.LoadDashboard(path)
 	if err != nil {
 		return
 	}
-	m.builder = views.NewBuilderView(m.theme, m.provider)
-	m.builder.LoadDashboard(dash, path)
-	m.builder.SetSize(m.width, m.height-3)
-	m.state = StateBuilder
+	m.editor = views.NewEditorView(m.theme, m.provider)
+	m.editor.LoadDashboard(dash, path)
+	m.editor.SetSize(m.width, m.height-3)
+	m.state = StateEditor
 }
 
 // editActiveDashboard opens the currently active dashboard for editing.
@@ -503,6 +530,8 @@ func (m AppModel) View() string {
 		body = m.builder.View()
 	case StateSettings:
 		body = m.settings.View()
+	case StateEditor:
+		body = m.editor.View()
 	default:
 		body = "View not implemented"
 	}

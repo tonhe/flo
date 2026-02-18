@@ -109,6 +109,15 @@ func (v HelpView) View() string {
 	lines = append(lines, bindingLine("Esc", "Back to dashboard"))
 	lines = append(lines, "")
 
+	// Edit Dashboard section
+	lines = append(lines, sectionStyle.Render("Edit Dashboard"))
+	lines = append(lines, bindingLine("Up / Down", "Navigate fields"))
+	lines = append(lines, bindingLine("Enter", "Edit field / drill in"))
+	lines = append(lines, bindingLine("a", "Add host / interface"))
+	lines = append(lines, bindingLine("d", "Delete host / interface"))
+	lines = append(lines, bindingLine("Esc", "Save & close / back"))
+	lines = append(lines, "")
+
 	// Identity / Builder section
 	lines = append(lines, sectionStyle.Render("Identity / Builder"))
 	lines = append(lines, bindingLine("Esc", "Close / Back"))
@@ -120,30 +129,23 @@ func (v HelpView) View() string {
 
 	content := strings.Join(lines, "\n")
 
-	// Modal box with rounded border
-	modal := v.sty.ModalBorder.
-		Width(innerWidth).
-		Render(content)
+	// Render modal body without a top border
+	noTopBorder := v.sty.ModalBorder.BorderTop(false)
+	modalBody := noTopBorder.Width(innerWidth).Render(content)
 
-	// Place title into the top border
-	title := v.sty.ModalTitle.Render(" Keyboard Shortcuts ")
-	modalLines := strings.Split(modal, "\n")
-	if len(modalLines) > 0 {
-		borderLine := modalLines[0]
-		if len(borderLine) > 2 {
-			runes := []rune(borderLine)
-			titleRunes := []rune(title)
-			insertPos := 2
-			if insertPos+len(titleRunes) < len(runes) {
-				combined := make([]rune, 0, len(runes))
-				combined = append(combined, runes[:insertPos]...)
-				combined = append(combined, titleRunes...)
-				combined = append(combined, runes[insertPos+len(titleRunes):]...)
-				modalLines[0] = string(combined)
-			}
-		}
-		modal = strings.Join(modalLines, "\n")
+	// Build top border manually with embedded title
+	borderFg := lipgloss.NewStyle().Foreground(v.theme.Base0D).Background(v.theme.Base00)
+	titleText := " Keyboard Shortcuts "
+	titleRendered := v.sty.ModalTitle.Render(titleText)
+
+	fullWidth := lipgloss.Width(modalBody)
+	rightDashes := fullWidth - 2 - 1 - len(titleText) // corners(2) + one dash + title visual width
+	if rightDashes < 0 {
+		rightDashes = 0
 	}
+	topBorder := borderFg.Render("╭─") + titleRendered + borderFg.Render(strings.Repeat("─", rightDashes)+"╮")
+
+	modal := topBorder + "\n" + modalBody
 
 	return lipgloss.Place(v.width, v.height, lipgloss.Center, lipgloss.Center, modal)
 }
