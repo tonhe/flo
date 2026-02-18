@@ -1,0 +1,67 @@
+version: 2
+
+env:
+  - CGO_ENABLED=0
+
+builds:
+  - binary: flo
+    main: .
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/tonhe/flo/internal/version.Version={{.Version}}
+      - -X github.com/tonhe/flo/internal/version.Build={{.ShortCommit}}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - LICENSE*
+      - README*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^Merge pull request"
+
+nfpms:
+  - package_name: flo
+    file_name_template: "{{ .ConventionalFileName }}"
+    vendor: tonhe
+    homepage: https://github.com/tonhe/flo
+    maintainer: tonhe
+    description: SNMP interface monitor with terminal UI
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+
+release:
+  github:
+    owner: tonhe
+    name: flo
+  name_template: "v{{.Version}}"
+  draft: false
+  prerelease: auto

@@ -14,7 +14,9 @@ clean:
 
 install: build
 	mkdir -p ~/bin
-	cp $(BINARY) ~/bin/$(BINARY)
+	cp $(BINARY) ~/bin/$(BINARY).new
+	mv ~/bin/$(BINARY).new ~/bin/$(BINARY)
+	xattr -c ~/bin/$(BINARY)
 
 release-dry-run:
 	goreleaser release --snapshot --clean
