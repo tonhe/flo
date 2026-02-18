@@ -79,19 +79,29 @@ func (v HelpView) View() string {
 
 	// Global section
 	lines = append(lines, sectionStyle.Render("Global"))
-	lines = append(lines, bindingLine("q / Ctrl+C", "Quit"))
+	lines = append(lines, bindingLine("Ctrl+C", "Quit"))
 	lines = append(lines, bindingLine("?", "Toggle this help"))
-	lines = append(lines, bindingLine("d", "Dashboard switcher"))
-	lines = append(lines, bindingLine("i", "Identity manager"))
-	lines = append(lines, bindingLine("n", "New dashboard wizard"))
-	lines = append(lines, bindingLine("s", "Settings"))
 	lines = append(lines, "")
 
 	// Dashboard section
 	lines = append(lines, sectionStyle.Render("Dashboard"))
-	lines = append(lines, bindingLine("j/k or Up/Dn", "Navigate interfaces"))
+	lines = append(lines, bindingLine("q", "Quit"))
+	lines = append(lines, bindingLine("Up / Down", "Navigate interfaces"))
 	lines = append(lines, bindingLine("Enter", "Detail view"))
+	lines = append(lines, bindingLine("d", "Dashboard switcher"))
+	lines = append(lines, bindingLine("e", "Edit active dashboard"))
+	lines = append(lines, bindingLine("i", "Identity manager"))
+	lines = append(lines, bindingLine("s", "Settings"))
 	lines = append(lines, bindingLine("r", "Force refresh"))
+	lines = append(lines, "")
+
+	// Switcher section
+	lines = append(lines, sectionStyle.Render("Dashboard Switcher"))
+	lines = append(lines, bindingLine("Enter", "Switch to dashboard"))
+	lines = append(lines, bindingLine("n", "New dashboard"))
+	lines = append(lines, bindingLine("e", "Edit dashboard"))
+	lines = append(lines, bindingLine("x", "Stop engine"))
+	lines = append(lines, bindingLine("Esc", "Close"))
 	lines = append(lines, "")
 
 	// Detail View section
@@ -99,8 +109,8 @@ func (v HelpView) View() string {
 	lines = append(lines, bindingLine("Esc", "Back to dashboard"))
 	lines = append(lines, "")
 
-	// Overlay views section
-	lines = append(lines, sectionStyle.Render("Switcher / Identity / Builder"))
+	// Identity / Builder section
+	lines = append(lines, sectionStyle.Render("Identity / Builder"))
 	lines = append(lines, bindingLine("Esc", "Close / Back"))
 	lines = append(lines, bindingLine("Enter", "Select / Confirm"))
 	lines = append(lines, "")

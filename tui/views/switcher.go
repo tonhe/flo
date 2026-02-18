@@ -26,6 +26,10 @@ const (
 	ActionSwitch
 	// ActionStop means the user wants to stop the selected engine.
 	ActionStop
+	// ActionNew means the user wants to create a new dashboard.
+	ActionNew
+	// ActionEdit means the user wants to edit the selected dashboard.
+	ActionEdit
 )
 
 // SwitcherItem represents a single dashboard entry in the switcher list.
@@ -137,6 +141,15 @@ func (v SwitcherView) Update(msg tea.Msg) (SwitcherView, tea.Cmd, SwitcherAction
 				return v, nil, ActionStop
 			}
 			return v, nil, ActionNone
+
+		case msg.String() == "n":
+			return v, nil, ActionNew
+
+		case msg.String() == "e":
+			if len(v.items) > 0 {
+				return v, nil, ActionEdit
+			}
+			return v, nil, ActionNone
 		}
 	}
 	return v, nil, ActionNone
@@ -177,8 +190,10 @@ func (v SwitcherView) View() string {
 	helpStyle := lipgloss.NewStyle().Foreground(v.theme.Base04)
 	helpKeyStyle := lipgloss.NewStyle().Foreground(v.theme.Base0D).Bold(true)
 	help := fmt.Sprintf(
-		"%s:switch  %s:stop  %s:close",
+		"%s:switch  %s:new  %s:edit  %s:stop  %s:close",
 		helpKeyStyle.Render("enter"),
+		helpKeyStyle.Render("n"),
+		helpKeyStyle.Render("e"),
 		helpKeyStyle.Render("x"),
 		helpKeyStyle.Render("esc"),
 	)

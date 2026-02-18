@@ -148,6 +148,12 @@ func (b *BuilderView) SetSize(width, height int) {
 	b.height = height
 }
 
+// LoadDashboard populates the builder from an existing dashboard for editing.
+// This is a stub that will be fully implemented in a later task.
+func (b *BuilderView) LoadDashboard(dash *dashboard.Dashboard, path string) {
+	// TODO: implement in Task 3
+}
+
 // Update handles messages for the builder wizard.
 func (b BuilderView) Update(msg tea.Msg) (BuilderView, tea.Cmd, BuilderAction) {
 	switch b.step {

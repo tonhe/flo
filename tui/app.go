@@ -171,6 +171,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// State-specific key handling
 		switch m.state {
 		case StateDashboard:
+			// 'q' to quit (only in dashboard, not in text-input views)
+			if msg.String() == "q" {
+				m.manager.StopAll()
+				return m, tea.Quit
+			}
 			// Open the dashboard switcher on 'd'
 			if key.Matches(msg, keys.DefaultKeyMap.Dashboard) {
 				m.state = StateSwitcher
@@ -184,11 +189,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = StateIdentity
 				return m, nil
 			}
-			// Open the dashboard builder on 'n'
-			if key.Matches(msg, keys.DefaultKeyMap.New) {
-				m.builder = views.NewBuilderView(m.theme, m.provider)
-				m.builder.SetSize(m.width, m.height-3)
-				m.state = StateBuilder
+			// Open the dashboard editor on 'e'
+			if key.Matches(msg, keys.DefaultKeyMap.Edit) {
+				if m.activeDash != "" {
+					m.editActiveDashboard()
+				}
 				return m, nil
 			}
 			// Open settings on 's'
@@ -267,6 +272,18 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.refreshSwitcher()
 				}
 				return m, nil
+
+			case views.ActionNew:
+				m.builder = views.NewBuilderView(m.theme, m.provider)
+				m.builder.SetSize(m.width, m.height-3)
+				m.state = StateBuilder
+				return m, nil
+
+			case views.ActionEdit:
+				if item := m.switcher.SelectedItem(); item != nil {
+					m.editDashboard(item.FilePath)
+				}
+				return m, nil
 			}
 			return m, cmd
 
@@ -281,9 +298,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case views.BuilderActionSave:
-				// Load the saved dashboard and start its engine
 				path := m.builder.SavedPath
 				if dash, err := dashboard.LoadDashboard(path); err == nil {
+					// Stop old engine if editing an active dashboard
+					if m.activeDash != "" {
+						_ = m.manager.Stop(m.activeDash)
+					}
 					if m.provider != nil {
 						_ = m.manager.Start(dash, m.provider)
 					}
@@ -355,6 +375,38 @@ func (m *AppModel) switchToDashboard(item *views.SwitcherItem) {
 		}
 	}
 	m.activeDash = dash.Name
+}
+
+// editDashboard loads a dashboard TOML and opens it in the builder for editing.
+func (m *AppModel) editDashboard(path string) {
+	dash, err := dashboard.LoadDashboard(path)
+	if err != nil {
+		return
+	}
+	m.builder = views.NewBuilderView(m.theme, m.provider)
+	m.builder.LoadDashboard(dash, path)
+	m.builder.SetSize(m.width, m.height-3)
+	m.state = StateBuilder
+}
+
+// editActiveDashboard opens the currently active dashboard for editing.
+func (m *AppModel) editActiveDashboard() {
+	dashDir, err := config.GetDashboardsDir()
+	if err != nil {
+		return
+	}
+	names, err := dashboard.ListDashboards(dashDir)
+	if err != nil {
+		return
+	}
+	for _, name := range names {
+		path := filepath.Join(dashDir, name+".toml")
+		dash, loadErr := dashboard.LoadDashboard(path)
+		if loadErr == nil && dash.Name == m.activeDash {
+			m.editDashboard(path)
+			return
+		}
+	}
 }
 
 // View renders the full application UI by composing header, body, and status.
