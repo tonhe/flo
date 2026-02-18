@@ -12,6 +12,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tonhe/flo/internal/config"
+	"github.com/tonhe/flo/internal/identity"
+	"github.com/tonhe/flo/tui/components"
 	"github.com/tonhe/flo/tui/keys"
 	"github.com/tonhe/flo/tui/styles"
 )
@@ -54,6 +56,11 @@ type SettingsView struct {
 	intervalInput textinput.Model
 	historyInput  textinput.Model
 
+	// Identity picker
+	showPicker bool
+	picker     components.IdentityPickerModel
+	provider   identity.Provider
+
 	// State
 	changed   bool
 	err       string
@@ -61,7 +68,7 @@ type SettingsView struct {
 }
 
 // NewSettingsView creates a fresh SettingsView populated from the current config.
-func NewSettingsView(theme styles.Theme, cfg *config.Config) SettingsView {
+func NewSettingsView(theme styles.Theme, cfg *config.Config, provider identity.Provider) SettingsView {
 	sty := styles.NewStyles(theme)
 
 	themeIdx := styles.GetThemeIndex(cfg.Theme)
@@ -96,6 +103,7 @@ func NewSettingsView(theme styles.Theme, cfg *config.Config) SettingsView {
 		identityInput: identityInput,
 		intervalInput: intervalInput,
 		historyInput:  historyInput,
+		provider:      provider,
 	}
 }
 
@@ -141,6 +149,20 @@ func (s *SettingsView) focusInput() {
 
 // Update handles messages for the settings view.
 func (s SettingsView) Update(msg tea.Msg) (SettingsView, tea.Cmd, SettingsAction) {
+	if s.showPicker {
+		var cmd tea.Cmd
+		var action components.PickerAction
+		s.picker, cmd, action = s.picker.Update(msg)
+		switch action {
+		case components.PickerSelected:
+			s.identityInput.SetValue(s.picker.SelectedName())
+			s.showPicker = false
+		case components.PickerCancelled:
+			s.showPicker = false
+		}
+		return s, cmd, SettingsNone
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
@@ -148,6 +170,12 @@ func (s SettingsView) Update(msg tea.Msg) (SettingsView, tea.Cmd, SettingsAction
 			return s, nil, SettingsClose
 
 		case key.Matches(msg, keys.DefaultKeyMap.Enter):
+			if s.cursor == settingsFieldIdentity {
+				s.picker = components.NewIdentityPickerModel(s.theme, s.provider)
+				s.picker.SetSize(s.width, s.height)
+				s.showPicker = true
+				return s, nil, SettingsNone
+			}
 			return s.save()
 
 		case key.Matches(msg, keys.DefaultKeyMap.Up):
@@ -291,6 +319,10 @@ func (s SettingsView) save() (SettingsView, tea.Cmd, SettingsAction) {
 
 // View renders the settings screen.
 func (s SettingsView) View() string {
+	if s.showPicker {
+		return s.picker.View()
+	}
+
 	titleStyle := lipgloss.NewStyle().
 		Foreground(s.theme.Base0D).
 		Bold(true)

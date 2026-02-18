@@ -224,7 +224,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Open settings on 's'
 			if key.Matches(msg, keys.DefaultKeyMap.Settings) {
-				m.settings = views.NewSettingsView(m.theme, m.config)
+				m.settings = views.NewSettingsView(m.theme, m.config, m.provider)
 				m.settings.SetSize(m.width, m.height-3)
 				m.state = StateSettings
 				return m, nil
