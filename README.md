@@ -8,6 +8,7 @@ Built with [Go](https://go.dev), [Bubble Tea](https://github.com/charmbracelet/b
 
 - **Real-time SNMP monitoring** with sparkline graphs and per-interface throughput
 - **Concurrent multi-dashboard support** -- background polling continues when switching views
+- **Identity picker modal** -- select from saved identities or create new ones inline, everywhere an identity is needed
 - **Encrypted identity management** using AES-256-GCM with Argon2id key derivation
 - **21 built-in Base16 themes** with live preview in the settings view
 - **Dashboard builder wizard** -- create dashboards interactively from the TUI
