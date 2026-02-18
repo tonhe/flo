@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -50,7 +51,7 @@ type IdentityPickerModel struct {
 	cursor    int // 0 = (none), 1..n = identity, n+1 = + New Identity
 
 	// Selected result (populated on PickerSelected)
-	SelectedName string
+	selectedName string
 
 	// Form mode state (reserved for Task 2)
 	formFields  []textinput.Model
@@ -58,9 +59,11 @@ type IdentityPickerModel struct {
 	formVersion string // current SNMP version
 	formAuth    string // current auth protocol
 	formPriv    string // current priv protocol
-	formEditing bool   // true when editing an existing identity
 	formErr     string
 }
+
+// SelectedName returns the name of the identity selected by the user.
+func (m IdentityPickerModel) SelectedName() string { return m.selectedName }
 
 // NewIdentityPickerModel creates a new IdentityPickerModel ready to display.
 // provider may be nil, in which case only the "(none)" entry is shown.
@@ -92,6 +95,7 @@ func (m *IdentityPickerModel) loadSummaries() {
 	if err != nil {
 		return
 	}
+	sort.Slice(sums, func(i, j int) bool { return sums[i].Name < sums[j].Name })
 	m.summaries = sums
 }
 
@@ -107,6 +111,8 @@ func (m IdentityPickerModel) Update(msg tea.Msg) (IdentityPickerModel, tea.Cmd, 
 	switch m.mode {
 	case pickerModeList:
 		return m.updateList(msg)
+	// pickerModeForm falls through to the default return below; form creation
+	// is not yet implemented (Task 2), so we treat it as a no-op for now.
 	}
 	return m, nil, PickerNone
 }
@@ -147,19 +153,19 @@ func (m IdentityPickerModel) confirmSelection() (IdentityPickerModel, tea.Cmd, P
 
 	// Row 0: (none)
 	if m.cursor == 0 {
-		m.SelectedName = ""
+		m.selectedName = ""
 		return m, nil, PickerSelected
 	}
 
-	// Last row: + New Identity (form mode not yet implemented)
+	// Last row: + New Identity (form mode not yet implemented; keep picker open)
 	if m.cursor == total-1 {
-		return m, nil, PickerCancelled
+		return m, nil, PickerNone
 	}
 
 	// Rows 1..n: existing identities
 	idx := m.cursor - 1
 	if idx >= 0 && idx < len(m.summaries) {
-		m.SelectedName = m.summaries[idx].Name
+		m.selectedName = m.summaries[idx].Name
 		return m, nil, PickerSelected
 	}
 
@@ -168,7 +174,9 @@ func (m IdentityPickerModel) confirmSelection() (IdentityPickerModel, tea.Cmd, P
 
 // View renders the picker as a centered modal overlay.
 func (m IdentityPickerModel) View() string {
-	// Modal width: responsive, capped between 34 and 56 characters.
+	// Modal width: responsive, capped between min 34 (enough for content) and
+	// max 56 (identity detail strings like "v3  user:longname  SHA256/AES256"
+	// fit comfortably; wider than SwitcherView which has shorter entries).
 	modalWidth := 44
 	if m.width > 60 {
 		modalWidth = m.width / 2
@@ -192,17 +200,17 @@ func (m IdentityPickerModel) View() string {
 	}
 
 	// Row 0: (none)
-	lines = append(lines, m.renderRow(0, "(none)", "", m.cursor == 0))
+	lines = append(lines, m.renderRow("(none)", "", m.cursor == 0))
 
 	// Rows 1..n: existing identities
 	for i, s := range m.summaries {
 		label := m.formatSummary(s)
-		lines = append(lines, m.renderRow(i+1, s.Name, label, m.cursor == i+1))
+		lines = append(lines, m.renderRow(s.Name, label, m.cursor == i+1))
 	}
 
 	// Last row: + New Identity
 	newIdx := m.totalItems() - 1
-	lines = append(lines, m.renderNewEntry(newIdx, innerWidth))
+	lines = append(lines, m.renderNewEntry(newIdx))
 
 	// Help line
 	helpStyle := lipgloss.NewStyle().Foreground(m.theme.Base04)
@@ -270,7 +278,7 @@ func (m IdentityPickerModel) formatSummary(s identity.Summary) string {
 }
 
 // renderRow renders a single list row with cursor indicator, name, and detail.
-func (m IdentityPickerModel) renderRow(idx int, name, detail string, selected bool) string {
+func (m IdentityPickerModel) renderRow(name, detail string, selected bool) string {
 	cursor := "  "
 	if selected {
 		cursor = "> "
@@ -292,7 +300,7 @@ func (m IdentityPickerModel) renderRow(idx int, name, detail string, selected bo
 }
 
 // renderNewEntry renders the "+ New Identity" action row.
-func (m IdentityPickerModel) renderNewEntry(idx int, _ int) string {
+func (m IdentityPickerModel) renderNewEntry(idx int) string {
 	selected := m.cursor == idx
 	cursor := "  "
 	if selected {
