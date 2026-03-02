@@ -93,6 +93,11 @@ func (v *IdentityView) SetProvider(provider identity.Provider) {
 	v.provider = provider
 }
 
+// Provider returns the current identity provider (may be nil).
+func (v *IdentityView) Provider() identity.Provider {
+	return v.provider
+}
+
 // SetStorePath sets the path for creating a new identity store.
 func (v *IdentityView) SetStorePath(path string) {
 	v.storePath = path

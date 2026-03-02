@@ -71,7 +71,8 @@ func (v DetailView) renderEmpty() string {
 		Foreground(v.theme.Base04).
 		Align(lipgloss.Center).
 		Render("No interface selected")
-	return lipgloss.Place(v.width, v.height, lipgloss.Center, lipgloss.Center, msg)
+	return lipgloss.Place(v.width, v.height, lipgloss.Center, lipgloss.Center, msg,
+		lipgloss.WithWhitespaceBackground(v.theme.Base00))
 }
 
 // renderDetail renders the full split-screen detail view.
@@ -96,24 +97,30 @@ func (v DetailView) renderDetail() string {
 	// Extract rate data from history
 	inData, outData := v.extractRateData()
 
-	// Render charts
-	inChart := components.RenderChart(inData, chartWidth, chartHeight, "In Traffic")
-	outChart := components.RenderChart(outData, chartWidth, chartHeight, "Out Traffic")
-
-	// Color the chart output
-	inChartStyled := lipgloss.NewStyle().
-		Foreground(v.theme.Base0B). // green for in
-		Render(inChart)
-	outChartStyled := lipgloss.NewStyle().
-		Foreground(v.theme.Base0C). // cyan for out
-		Render(outChart)
+	// Render charts with proper per-element coloring
+	inColors := components.ChartColors{
+		BarFg:   v.theme.Base0B, // green for in
+		LabelFg: v.theme.Base04, // dim for labels
+		TitleFg: v.theme.Base0D, // blue for title
+		Bg:      v.theme.Base00, // theme background
+	}
+	outColors := components.ChartColors{
+		BarFg:   v.theme.Base0C, // cyan for out
+		LabelFg: v.theme.Base04, // dim for labels
+		TitleFg: v.theme.Base0D, // blue for title
+		Bg:      v.theme.Base00, // theme background
+	}
+	inChart := components.RenderChart(inData, chartWidth, chartHeight, "In Traffic", inColors)
+	outChart := components.RenderChart(outData, chartWidth, chartHeight, "Out Traffic", outColors)
 
 	// Join charts side by side with a separator
-	sep := lipgloss.NewStyle().
-		Foreground(v.theme.Base03).
-		Render(strings.Repeat(" | \n", chartHeight))
-	// Use lipgloss to join horizontally
-	chartsSection := lipgloss.JoinHorizontal(lipgloss.Top, inChartStyled, sep, outChartStyled)
+	sepStyle := lipgloss.NewStyle().Foreground(v.theme.Base03).Background(v.theme.Base00)
+	sepLines := make([]string, chartHeight+1) // +1 for title row
+	for i := range sepLines {
+		sepLines[i] = sepStyle.Render(" | ")
+	}
+	sep := strings.Join(sepLines, "\n")
+	chartsSection := lipgloss.JoinHorizontal(lipgloss.Top, inChart, sep, outChart)
 
 	// Compose final layout: info panel on top, charts on bottom
 	helpLine := v.renderHelp()
@@ -124,63 +131,52 @@ func (v DetailView) renderDetail() string {
 
 // renderInfoPanel renders the interface information section at the top.
 func (v DetailView) renderInfoPanel(iface *engine.InterfaceStats) string {
+	bg := v.theme.Base00
 	labelStyle := lipgloss.NewStyle().
 		Foreground(v.theme.Base04).
+		Background(bg).
 		Width(16)
 	valueStyle := lipgloss.NewStyle().
-		Foreground(v.theme.Base05)
+		Foreground(v.theme.Base05).
+		Background(bg)
 	highlightStyle := lipgloss.NewStyle().
 		Foreground(v.theme.Base0D).
+		Background(bg).
 		Bold(true)
 
 	// Status color
-	statusStyle := lipgloss.NewStyle().Foreground(v.theme.Base0A)
+	statusStyle := lipgloss.NewStyle().Foreground(v.theme.Base0A).Background(bg)
 	switch iface.Status {
 	case "up":
-		statusStyle = lipgloss.NewStyle().Foreground(v.theme.Base0B)
+		statusStyle = lipgloss.NewStyle().Foreground(v.theme.Base0B).Background(bg)
 	case "down":
-		statusStyle = lipgloss.NewStyle().Foreground(v.theme.Base08)
+		statusStyle = lipgloss.NewStyle().Foreground(v.theme.Base08).Background(bg)
 	}
 
 	// Speed formatting
 	speedStr := formatSpeed(iface.Speed)
 
 	// Utilization with threshold coloring
-	utilStyle := lipgloss.NewStyle().Foreground(v.theme.Base0B)
+	utilStyle := lipgloss.NewStyle().Foreground(v.theme.Base0B).Background(bg)
 	switch {
 	case iface.Utilization >= 80:
-		utilStyle = lipgloss.NewStyle().Foreground(v.theme.Base08)
+		utilStyle = lipgloss.NewStyle().Foreground(v.theme.Base08).Background(bg)
 	case iface.Utilization >= 50:
-		utilStyle = lipgloss.NewStyle().Foreground(v.theme.Base0A)
+		utilStyle = lipgloss.NewStyle().Foreground(v.theme.Base0A).Background(bg)
 	}
 
 	// Build info rows
+	pad := lipgloss.NewStyle().Background(bg).Render("  ")
 	rows := []string{
 		"",
-		fmt.Sprintf("  %s%s",
-			labelStyle.Render("Device:"),
-			highlightStyle.Render(v.targetLabel)),
-		fmt.Sprintf("  %s%s",
-			labelStyle.Render("Interface:"),
-			highlightStyle.Render(iface.Name)),
-		fmt.Sprintf("  %s%s",
-			labelStyle.Render("Description:"),
-			valueStyle.Render(iface.Description)),
-		fmt.Sprintf("  %s%s",
-			labelStyle.Render("Status:"),
-			statusStyle.Render(iface.Status)),
-		fmt.Sprintf("  %s%s",
-			labelStyle.Render("Speed:"),
-			valueStyle.Render(speedStr)),
-		fmt.Sprintf("  %s%s",
-			labelStyle.Render("Current In:"),
-			valueStyle.Render(components.FormatRate(iface.InRate))),
-		fmt.Sprintf("  %s%s",
-			labelStyle.Render("Current Out:"),
-			valueStyle.Render(components.FormatRate(iface.OutRate))),
-		fmt.Sprintf("  %s%s",
-			labelStyle.Render("Utilization:"),
-			utilStyle.Render(fmt.Sprintf("%.1f%%", iface.Utilization))),
+		pad + labelStyle.Render("Device:") + highlightStyle.Render(v.targetLabel),
+		pad + labelStyle.Render("Interface:") + highlightStyle.Render(iface.Name),
+		pad + labelStyle.Render("Description:") + valueStyle.Render(iface.Description),
+		pad + labelStyle.Render("Status:") + statusStyle.Render(iface.Status),
+		pad + labelStyle.Render("Speed:") + valueStyle.Render(speedStr),
+		pad + labelStyle.Render("Current In:") + valueStyle.Render(components.FormatRate(iface.InRate)),
+		pad + labelStyle.Render("Current Out:") + valueStyle.Render(components.FormatRate(iface.OutRate)),
+		pad + labelStyle.Render("Utilization:") + utilStyle.Render(fmt.Sprintf("%.1f%%", iface.Utilization)),
 	}
 
 	return strings.Join(rows, "\n")
@@ -188,8 +184,8 @@ func (v DetailView) renderInfoPanel(iface *engine.InterfaceStats) string {
 
 // renderHelp renders a help line at the bottom of the detail view.
 func (v DetailView) renderHelp() string {
-	helpStyle := lipgloss.NewStyle().Foreground(v.theme.Base04)
-	keyStyle := lipgloss.NewStyle().Foreground(v.theme.Base0D).Bold(true)
+	helpStyle := lipgloss.NewStyle().Foreground(v.theme.Base04).Background(v.theme.Base00)
+	keyStyle := lipgloss.NewStyle().Foreground(v.theme.Base0D).Background(v.theme.Base00).Bold(true)
 	return helpStyle.Render(fmt.Sprintf("  %s to go back", keyStyle.Render("[esc]")))
 }
 

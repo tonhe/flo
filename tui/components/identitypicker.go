@@ -271,7 +271,8 @@ func (m IdentityPickerModel) View() string {
 
 	modal := topBorder + "\n" + modalBody
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal,
+		lipgloss.WithWhitespaceBackground(m.theme.Base00))
 }
 
 // formatSummary returns the display detail string for an identity summary.
@@ -768,5 +769,6 @@ func (m IdentityPickerModel) viewForm() string {
 
 	modal := topBorder + "\n" + modalBody
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal,
+		lipgloss.WithWhitespaceBackground(m.theme.Base00))
 }

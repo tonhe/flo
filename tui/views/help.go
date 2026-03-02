@@ -147,5 +147,6 @@ func (v HelpView) View() string {
 
 	modal := topBorder + "\n" + modalBody
 
-	return lipgloss.Place(v.width, v.height, lipgloss.Center, lipgloss.Center, modal)
+	return lipgloss.Place(v.width, v.height, lipgloss.Center, lipgloss.Center, modal,
+		lipgloss.WithWhitespaceBackground(v.theme.Base00))
 }

@@ -376,7 +376,8 @@ func (v DashboardView) renderEmpty() string {
 		"",
 	)
 
-	return lipgloss.Place(v.width, v.height, lipgloss.Center, lipgloss.Center, msg)
+	return lipgloss.Place(v.width, v.height, lipgloss.Center, lipgloss.Center, msg,
+		lipgloss.WithWhitespaceBackground(v.theme.Base00))
 }
 
 // extractSparkData pulls utilization values from the history ring buffer

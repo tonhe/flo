@@ -4,24 +4,40 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // chartBlocks are block characters from empty to full, used for rendering
 // the chart area. Index 0 is empty (space), index 8 is full block.
 var chartBlocks = []rune{' ', '\u2581', '\u2582', '\u2583', '\u2584', '\u2585', '\u2586', '\u2587', '\u2588'}
 
+// ChartColors holds the color configuration for chart rendering.
+type ChartColors struct {
+	BarFg   lipgloss.Color // foreground for bar block characters
+	LabelFg lipgloss.Color // foreground for Y-axis labels
+	TitleFg lipgloss.Color // foreground for the title text
+	Bg      lipgloss.Color // background for all chart elements
+}
+
 // RenderChart renders an ASCII line chart using block characters.
 // data: values to plot (oldest to newest, left to right)
 // width: total width in characters (including Y-axis labels)
 // height: total height in characters (including title row)
 // title: chart title displayed at the top
-func RenderChart(data []float64, width, height int, title string) string {
+// colors: themed colors for the chart elements
+func RenderChart(data []float64, width, height int, title string, colors ChartColors) string {
 	if width < 10 {
 		width = 10
 	}
 	if height < 4 {
 		height = 4
 	}
+
+	barStyle := lipgloss.NewStyle().Foreground(colors.BarFg).Background(colors.Bg)
+	labelStyle := lipgloss.NewStyle().Foreground(colors.LabelFg).Background(colors.Bg)
+	titleStyle := lipgloss.NewStyle().Foreground(colors.TitleFg).Background(colors.Bg)
+	emptyStyle := lipgloss.NewStyle().Background(colors.Bg)
 
 	// Reserve space: Y-axis label width and title row
 	labelWidth := 8 // e.g. "  1.2G "
@@ -37,15 +53,13 @@ func RenderChart(data []float64, width, height int, title string) string {
 	var lines []string
 
 	// Title row - centered within the full width
-	titleLine := centerText(title, width)
+	titleLine := titleStyle.Render(centerText(title, width))
 	lines = append(lines, titleLine)
 
 	// Handle empty or insufficient data
 	if len(data) == 0 {
 		for i := 0; i < chartHeight; i++ {
-			label := strings.Repeat(" ", labelWidth)
-			row := strings.Repeat(" ", chartWidth)
-			lines = append(lines, label+row)
+			lines = append(lines, emptyStyle.Render(strings.Repeat(" ", width)))
 		}
 		return strings.Join(lines, "\n")
 	}
@@ -88,27 +102,27 @@ func RenderChart(data []float64, width, height int, title string) string {
 			label = label[len(label)-labelWidth:]
 		}
 
-		var rowChars []rune
+		var barChars strings.Builder
+		var emptyChars strings.Builder
 
 		// Build padding for data that doesn't fill the chart width
 		padding := chartWidth - len(data)
 		for p := 0; p < padding; p++ {
-			rowChars = append(rowChars, ' ')
+			emptyChars.WriteRune(' ')
 		}
 
 		for _, v := range data {
 			// Calculate how much of this cell the value fills.
-			// cellBottom is the value at the bottom edge of this cell.
 			cellBottom := minVal + spread*float64(row)/float64(chartHeight)
 			cellTop := minVal + spread*float64(row+1)/float64(chartHeight)
 			cellRange := cellTop - cellBottom
 
 			if v <= cellBottom {
 				// Value is below this cell
-				rowChars = append(rowChars, ' ')
+				barChars.WriteRune(' ')
 			} else if v >= cellTop {
 				// Value fills this entire cell
-				rowChars = append(rowChars, chartBlocks[8])
+				barChars.WriteRune(chartBlocks[8])
 			} else {
 				// Value partially fills this cell
 				fraction := (v - cellBottom) / cellRange
@@ -119,11 +133,14 @@ func RenderChart(data []float64, width, height int, title string) string {
 				if idx > 8 {
 					idx = 8
 				}
-				rowChars = append(rowChars, chartBlocks[idx])
+				barChars.WriteRune(chartBlocks[idx])
 			}
 		}
 
-		lines = append(lines, label+string(rowChars))
+		line := labelStyle.Render(label) +
+			emptyStyle.Render(emptyChars.String()) +
+			barStyle.Render(barChars.String())
+		lines = append(lines, line)
 	}
 
 	return strings.Join(lines, "\n")

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/tonhe/flo/cmd"
 	"github.com/tonhe/flo/internal/config"
 	"github.com/tonhe/flo/internal/engine"
@@ -16,6 +18,11 @@ import (
 )
 
 func main() {
+	// Force 24-bit true color so ANSI background escapes work correctly
+	// on all terminals, including Windows Terminal where auto-detection
+	// can be unreliable.
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
 	args := os.Args[1:]
 
 	// Parse TUI flags (--dashboard, --theme, --help) before subcommand check

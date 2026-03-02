@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"fmt"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -268,6 +271,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			var goBack bool
 			m.identity, cmd, goBack = m.identity.Update(msg)
+			// Propagate newly created provider from identity view to app model
+			if m.provider == nil {
+				if p := m.identity.Provider(); p != nil {
+					m.provider = p
+				}
+			}
 			if goBack {
 				m.state = StateDashboard
 				return m, nil
@@ -360,12 +369,17 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Apply the new theme to all views
 				if t := styles.GetThemeByName(m.settings.SavedTheme); t != nil {
 					m.theme = *t
+					bodyHeight := m.height - 3
 					m.dashboard = views.NewDashboardView(m.theme)
-					m.dashboard.SetSize(m.width, m.height-3)
+					m.dashboard.SetSize(m.width, bodyHeight)
 					m.switcher = views.NewSwitcherView(m.theme)
+					m.switcher.SetSize(m.width, bodyHeight)
 					m.detail = views.NewDetailView(m.theme)
+					m.detail.SetSize(m.width, bodyHeight)
 					m.identity = views.NewIdentityView(m.theme, m.provider)
+					m.identity.SetSize(m.width, bodyHeight)
 					m.help = views.NewHelpView(m.theme)
+					m.help.SetSize(m.width, bodyHeight)
 				}
 				m.state = StateDashboard
 				return m, nil
@@ -493,7 +507,8 @@ func (m AppModel) renderQuitConfirm() string {
 	)
 
 	modal := sty.ModalBorder.Width(36).Render(content)
-	return lipgloss.Place(m.width, bodyHeight, lipgloss.Center, lipgloss.Center, modal)
+	return lipgloss.Place(m.width, bodyHeight, lipgloss.Center, lipgloss.Center, modal,
+		lipgloss.WithWhitespaceBackground(m.theme.Base00))
 }
 
 // View renders the full application UI by composing header, body, and status.
@@ -565,33 +580,69 @@ func (m AppModel) View() string {
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
-	bodyStyle := lipgloss.NewStyle().
-		Width(m.width).
-		Height(bodyHeight).
-		Background(m.theme.Base00).
-		Foreground(m.theme.Base05)
 
 	// When a modal is active, use its already-centered output as the body
 	// instead of overlaying on top of the full screen. Both switcher and help
 	// call lipgloss.Place() internally, so their output is already sized to
 	// width x bodyHeight.
 	if m.confirmQuit {
-		modalBody := m.renderQuitConfirm()
-		full := lipgloss.JoinVertical(lipgloss.Left, header, bodyStyle.Render(modalBody), statusBar)
-		return full
-	}
-	if m.help.IsVisible() {
-		modalBody := m.help.View()
-		full := lipgloss.JoinVertical(lipgloss.Left, header, bodyStyle.Render(modalBody), statusBar)
-		return full
-	}
-	if m.state == StateSwitcher {
-		modalBody := m.switcher.View()
-		full := lipgloss.JoinVertical(lipgloss.Left, header, bodyStyle.Render(modalBody), statusBar)
-		return full
+		body = m.renderQuitConfirm()
+	} else if m.help.IsVisible() {
+		body = m.help.View()
+	} else if m.state == StateSwitcher {
+		body = m.switcher.View()
 	}
 
-	full := lipgloss.JoinVertical(lipgloss.Left, header, bodyStyle.Render(body), statusBar)
+	filledBody := fillBackground(body, m.width, bodyHeight, m.theme.Base00)
+	full := lipgloss.JoinVertical(lipgloss.Left, header, filledBody, statusBar)
 	return full
+}
+
+// fillBackground post-processes rendered ANSI output to ensure the theme
+// background covers every character cell. lipgloss child styles emit
+// \x1b[0m resets that kill the outer background, leaving the terminal's
+// default black showing through. This function operates at the raw ANSI
+// level: it injects the background escape code after every reset sequence
+// so the theme background is always active.
+func fillBackground(content string, width, height int, bg lipgloss.Color) string {
+	bgCode := hexToANSIBg(string(bg))
+	reset := "\x1b[0m"
+
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		// Re-inject background after every reset within the line
+		patched := strings.ReplaceAll(line, reset, reset+bgCode)
+		// Prepend background at start of line
+		patched = bgCode + patched
+		// Pad to full width with spaces (bg is already active)
+		visible := lipgloss.Width(patched)
+		if visible < width {
+			patched += strings.Repeat(" ", width-visible)
+		}
+		// Close with a reset so the next line starts clean
+		lines[i] = patched + reset
+	}
+	// Fill remaining height with empty background rows
+	emptyRow := bgCode + strings.Repeat(" ", width) + reset
+	for len(lines) < height {
+		lines = append(lines, emptyRow)
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// hexToANSIBg converts a hex color string (e.g. "#1e1e2e") to a raw
+// 24-bit ANSI background escape sequence.
+func hexToANSIBg(hex string) string {
+	hex = strings.TrimPrefix(hex, "#")
+	if len(hex) != 6 {
+		return ""
+	}
+	r, _ := strconv.ParseUint(hex[0:2], 16, 8)
+	g, _ := strconv.ParseUint(hex[2:4], 16, 8)
+	b, _ := strconv.ParseUint(hex[4:6], 16, 8)
+	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", r, g, b)
 }
 

@@ -223,7 +223,8 @@ func (v SwitcherView) View() string {
 	modal := topBorder + "\n" + modalBody
 
 	// Center the modal in the available space
-	return lipgloss.Place(v.width, v.height, lipgloss.Center, lipgloss.Center, modal)
+	return lipgloss.Place(v.width, v.height, lipgloss.Center, lipgloss.Center, modal,
+		lipgloss.WithWhitespaceBackground(v.theme.Base00))
 }
 
 // renderItem renders a single dashboard item line.
