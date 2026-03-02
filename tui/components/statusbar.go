@@ -9,9 +9,16 @@ import (
 	"github.com/tonhe/flo/tui/styles"
 )
 
+// KeyHint is a key-description pair shown in the status bar.
+type KeyHint struct {
+	Key  string // e.g. "enter", "esc", "q"
+	Desc string // e.g. "detail", "back", "quit"
+}
+
 // RenderStatusBar renders the two-line status/footer bar showing poll info,
-// health status, and key bindings.
-func RenderStatusBar(theme styles.Theme, interval time.Duration, lastPoll time.Time, okCount, totalCount, width int) string {
+// health status, and key bindings. The hints parameter controls which key
+// bindings are displayed, allowing per-view customization.
+func RenderStatusBar(theme styles.Theme, interval time.Duration, lastPoll time.Time, okCount, totalCount, width int, hints []KeyHint) string {
 	bg := theme.Base01
 	bgStyle := lipgloss.NewStyle().Background(bg)
 	sep := lipgloss.NewStyle().Foreground(theme.Base03).Background(bg).Render(" | ")
@@ -40,14 +47,13 @@ func RenderStatusBar(theme styles.Theme, interval time.Duration, lastPoll time.T
 	descStyle := lipgloss.NewStyle().Foreground(theme.Base04).Background(bg)
 	spacer := bgStyle.Render("  ")
 
-	keys := bgStyle.Render(" ") +
-		keyStyle.Render("enter") + descStyle.Render(":detail") + spacer +
-		keyStyle.Render("d") + descStyle.Render(":dashboards") + spacer +
-		keyStyle.Render("i") + descStyle.Render(":identities") + spacer +
-		keyStyle.Render("e") + descStyle.Render(":edit") + spacer +
-		keyStyle.Render("s") + descStyle.Render(":settings") + spacer +
-		keyStyle.Render("?") + descStyle.Render(":help") + spacer +
-		keyStyle.Render("q") + descStyle.Render(":quit")
+	keys := bgStyle.Render(" ")
+	for i, h := range hints {
+		if i > 0 {
+			keys += spacer
+		}
+		keys += keyStyle.Render(h.Key) + descStyle.Render(":"+h.Desc)
+	}
 
 	keysWidth := lipgloss.Width(keys)
 	if keysWidth < width {

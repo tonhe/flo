@@ -218,6 +218,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = StateIdentity
 				return m, nil
 			}
+			// Create new dashboard on 'n'
+			if msg.String() == "n" {
+				m.builder = views.NewBuilderView(m.theme, m.provider)
+				m.builder.SetSize(m.width, m.height-3)
+				m.state = StateBuilder
+				return m, nil
+			}
 			// Open the dashboard editor on 'e'
 			if key.Matches(msg, keys.DefaultKeyMap.Edit) {
 				if m.activeDash != "" {
@@ -573,7 +580,43 @@ func (m AppModel) View() string {
 		interval = m.config.PollInterval
 	}
 
-	statusBar := components.RenderStatusBar(m.theme, interval, lastPoll, okCount, totalCount, m.width)
+	// Per-state key hints for the status bar
+	var hints []components.KeyHint
+	switch m.state {
+	case StateDashboard:
+		hints = []components.KeyHint{
+			{"enter", "detail"}, {"d", "dashboards"}, {"n", "new"},
+			{"i", "identities"}, {"e", "edit"}, {"s", "settings"},
+			{"r", "refresh"}, {"?", "help"}, {"q", "quit"},
+		}
+	case StateDetail:
+		hints = []components.KeyHint{
+			{"esc", "back"}, {"?", "help"}, {"q", "quit"},
+		}
+	case StateSwitcher:
+		hints = []components.KeyHint{
+			{"enter", "switch"}, {"n", "new"}, {"e", "edit"},
+			{"x", "stop"}, {"esc", "close"}, {"?", "help"}, {"q", "quit"},
+		}
+	case StateIdentity:
+		hints = []components.KeyHint{
+			{"esc", "back"}, {"?", "help"}, {"ctrl+c", "quit"},
+		}
+	case StateBuilder:
+		hints = []components.KeyHint{
+			{"esc", "cancel"}, {"?", "help"}, {"ctrl+c", "quit"},
+		}
+	case StateEditor:
+		hints = []components.KeyHint{
+			{"esc", "save & close"}, {"?", "help"}, {"ctrl+c", "quit"},
+		}
+	case StateSettings:
+		hints = []components.KeyHint{
+			{"esc", "cancel"}, {"?", "help"}, {"ctrl+c", "quit"},
+		}
+	}
+
+	statusBar := components.RenderStatusBar(m.theme, interval, lastPoll, okCount, totalCount, m.width, hints)
 
 	// Fill body to the available height between header and status bar
 	bodyHeight := m.height - 1 - 2 // 1 header line, 2 status bar lines
