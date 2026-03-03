@@ -496,15 +496,15 @@ func (m AppModel) tryQuit() (tea.Model, tea.Cmd) {
 }
 
 // renderQuitConfirm renders the quit confirmation modal dialog.
-func (m AppModel) renderQuitConfirm() string {
+func (m AppModel) renderQuitConfirm(theme styles.Theme) string {
 	bodyHeight := m.height - 3
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
-	sty := styles.NewStyles(m.theme)
-	textStyle := lipgloss.NewStyle().Foreground(m.theme.Base05)
-	keyStyle := lipgloss.NewStyle().Foreground(m.theme.Base0D).Bold(true)
-	dimStyle := lipgloss.NewStyle().Foreground(m.theme.Base04)
+	sty := styles.NewStyles(theme)
+	textStyle := lipgloss.NewStyle().Foreground(theme.Base05)
+	keyStyle := lipgloss.NewStyle().Foreground(theme.Base0D).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(theme.Base04)
 
 	content := lipgloss.JoinVertical(lipgloss.Left,
 		textStyle.Render("Engines are still running."),
@@ -515,7 +515,7 @@ func (m AppModel) renderQuitConfirm() string {
 
 	modal := sty.ModalBorder.Width(36).Render(content)
 	return lipgloss.Place(m.width, bodyHeight, lipgloss.Center, lipgloss.Center, modal,
-		lipgloss.WithWhitespaceBackground(m.theme.Base00))
+		lipgloss.WithWhitespaceBackground(theme.Base00))
 }
 
 // View renders the full application UI by composing header, body, and status.
@@ -635,7 +635,7 @@ func (m AppModel) View() string {
 	// call lipgloss.Place() internally, so their output is already sized to
 	// width x bodyHeight.
 	if m.confirmQuit {
-		body = m.renderQuitConfirm()
+		body = m.renderQuitConfirm(renderTheme)
 	} else if m.help.IsVisible() {
 		body = m.help.View()
 	} else if m.state == StateSwitcher {
