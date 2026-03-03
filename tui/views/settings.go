@@ -61,6 +61,10 @@ type SettingsView struct {
 	picker     components.IdentityPickerModel
 	provider   identity.Provider
 
+	// Theme picker
+	showThemePicker bool
+	themePicker     components.ThemePickerModel
+
 	// State
 	changed   bool
 	err       string
@@ -131,6 +135,16 @@ func (s SettingsView) selectedTheme() styles.Theme {
 	return styles.DefaultTheme
 }
 
+// PreviewTheme returns the theme currently being previewed. When the
+// full-screen picker is open this is the highlighted theme; otherwise
+// it is the theme selected via left/right cycling.
+func (s SettingsView) PreviewTheme() styles.Theme {
+	if s.showThemePicker {
+		return s.themePicker.PreviewTheme()
+	}
+	return s.theme
+}
+
 // focusInput blurs all inputs and focuses the one at the cursor position.
 func (s *SettingsView) focusInput() {
 	s.identityInput.Blur()
@@ -163,6 +177,27 @@ func (s SettingsView) Update(msg tea.Msg) (SettingsView, tea.Cmd, SettingsAction
 		return s, cmd, SettingsNone
 	}
 
+	if s.showThemePicker {
+		var cmd tea.Cmd
+		var action components.ThemePickerAction
+		s.themePicker, cmd, action = s.themePicker.Update(msg)
+		switch action {
+		case components.ThemePickerSelected:
+			slug := s.themePicker.SelectedSlug()
+			s.themeIndex = styles.GetThemeIndex(slug)
+			if s.themeIndex < 0 {
+				s.themeIndex = 0
+			}
+			s.theme = s.selectedTheme()
+			s.sty = styles.NewStyles(s.theme)
+			s.changed = true
+			s.showThemePicker = false
+		case components.ThemePickerCancelled:
+			s.showThemePicker = false
+		}
+		return s, cmd, SettingsNone
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
@@ -170,6 +205,12 @@ func (s SettingsView) Update(msg tea.Msg) (SettingsView, tea.Cmd, SettingsAction
 			return s, nil, SettingsClose
 
 		case key.Matches(msg, keys.DefaultKeyMap.Enter):
+			if s.cursor == settingsFieldTheme {
+				s.themePicker = components.NewThemePickerModel(s.selectedThemeSlug())
+				s.themePicker.SetSize(s.width, s.height)
+				s.showThemePicker = true
+				return s, nil, SettingsNone
+			}
 			if s.cursor == settingsFieldIdentity {
 				s.picker = components.NewIdentityPickerModel(s.theme, s.provider)
 				s.picker.SetSize(s.width, s.height)
@@ -319,6 +360,9 @@ func (s SettingsView) save() (SettingsView, tea.Cmd, SettingsAction) {
 
 // View renders the settings screen.
 func (s SettingsView) View() string {
+	if s.showThemePicker {
+		return s.themePicker.View()
+	}
 	if s.showPicker {
 		return s.picker.View()
 	}
@@ -385,121 +429,9 @@ func (s SettingsView) View() string {
 		}
 	}
 
-	// Theme preview
-	b.WriteString("\n")
-	b.WriteString(s.renderThemePreview())
-
 	// Help line
 	b.WriteString("\n")
 	b.WriteString("  " + s.renderHelp() + "\n")
-
-	return b.String()
-}
-
-// renderThemePreview renders a small preview panel showing the selected theme's colors.
-func (s SettingsView) renderThemePreview() string {
-	previewTheme := s.selectedTheme()
-
-	sepStyle := lipgloss.NewStyle().Foreground(previewTheme.Base03)
-	titleStyle := lipgloss.NewStyle().Foreground(previewTheme.Base0D).Bold(true)
-
-	previewWidth := 56
-	if s.width > 0 && s.width-6 < previewWidth {
-		previewWidth = s.width - 6
-	}
-	if previewWidth < 30 {
-		previewWidth = 30
-	}
-
-	var b strings.Builder
-
-	// Preview header line
-	label := " Theme Preview "
-	dashCount := previewWidth - len(label)
-	if dashCount < 2 {
-		dashCount = 2
-	}
-	leftDash := dashCount / 2
-	rightDash := dashCount - leftDash
-	b.WriteString("  " + sepStyle.Render(strings.Repeat("-", leftDash)) + titleStyle.Render(label) + sepStyle.Render(strings.Repeat("-", rightDash)) + "\n")
-
-	// Sample header bar
-	headerBg := lipgloss.NewStyle().
-		Background(previewTheme.Base01).
-		Foreground(previewTheme.Base05).
-		Bold(true).
-		Padding(0, 1)
-	headerTitle := lipgloss.NewStyle().
-		Background(previewTheme.Base01).
-		Foreground(previewTheme.Base0D).
-		Bold(true)
-	b.WriteString("  " + headerBg.Render(headerTitle.Render("flo")+" - Sample Dashboard"+strings.Repeat(" ", max(0, previewWidth-28))) + "\n")
-
-	// Sample table header
-	thStyle := lipgloss.NewStyle().
-		Foreground(previewTheme.Base0D).
-		Bold(true)
-	b.WriteString("  " + fmt.Sprintf("  %s%s%s",
-		thStyle.Render(padRight("Interface", 16)),
-		thStyle.Render(padRight("Status", 10)),
-		thStyle.Render(padRight("Utilization", 14)),
-	) + "\n")
-
-	// Sample rows
-	rowStyle := lipgloss.NewStyle().Foreground(previewTheme.Base05)
-	upStyle := lipgloss.NewStyle().Foreground(previewTheme.Base0B)
-	downStyle := lipgloss.NewStyle().Foreground(previewTheme.Base08)
-	warnStyle := lipgloss.NewStyle().Foreground(previewTheme.Base0A)
-	utilLow := lipgloss.NewStyle().Foreground(previewTheme.Base0B)
-	utilHigh := lipgloss.NewStyle().Foreground(previewTheme.Base08)
-
-	sampleRows := []struct {
-		name   string
-		status string
-		sStyle lipgloss.Style
-		util   string
-		uStyle lipgloss.Style
-	}{
-		{"Gi0/0/0", "Up", upStyle, "23%", utilLow},
-		{"Gi0/0/1", "Down", downStyle, "0%", downStyle},
-		{"Gi0/0/2", "Up", upStyle, "87%", utilHigh},
-		{"Gi0/0/3", "Up", warnStyle, "45%", warnStyle},
-	}
-
-	for _, r := range sampleRows {
-		b.WriteString("  " + fmt.Sprintf("  %s%s%s",
-			rowStyle.Render(padRight(r.name, 16)),
-			r.sStyle.Render(padRight(r.status, 10)),
-			r.uStyle.Render(padRight(r.util, 14)),
-		) + "\n")
-	}
-
-	// Color swatch row
-	b.WriteString("\n")
-	swatchLabel := lipgloss.NewStyle().Foreground(previewTheme.Base04)
-	b.WriteString("  " + swatchLabel.Render("Colors: "))
-
-	colorPairs := []struct {
-		name  string
-		color lipgloss.Color
-	}{
-		{"red", previewTheme.Base08},
-		{"org", previewTheme.Base09},
-		{"yel", previewTheme.Base0A},
-		{"grn", previewTheme.Base0B},
-		{"cyn", previewTheme.Base0C},
-		{"blu", previewTheme.Base0D},
-		{"mag", previewTheme.Base0E},
-	}
-
-	for _, cp := range colorPairs {
-		cs := lipgloss.NewStyle().Foreground(cp.color)
-		b.WriteString(cs.Render(cp.name) + " ")
-	}
-	b.WriteString("\n")
-
-	// Bottom border
-	b.WriteString("  " + sepStyle.Render(strings.Repeat("-", previewWidth)) + "\n")
 
 	return b.String()
 }
