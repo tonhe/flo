@@ -1,6 +1,6 @@
 BINARY  := flo
 GOFLAGS := -trimpath
-VERSION := 0.1.0
+VERSION := 0.2.0
 BUILD   := $(shell date +%m%d%Y.%H%M)
 LDFLAGS := -s -w -X github.com/tonhe/flo/internal/version.Version=$(VERSION) -X github.com/tonhe/flo/internal/version.Build=$(BUILD)
 

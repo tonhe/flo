@@ -524,10 +524,16 @@ func (m AppModel) View() string {
 		return "Loading..."
 	}
 
+	// Use the settings preview theme for immersive rendering when in settings.
+	renderTheme := m.theme
+	if m.state == StateSettings {
+		renderTheme = m.settings.PreviewTheme()
+	}
+
 	// Header bar (non-blocking to avoid freezing during poll cycles)
 	engineList := m.manager.TryListEngines()
 	header := components.RenderHeader(
-		m.theme,
+		renderTheme,
 		m.activeDash,
 		m.activeDash != "",
 		len(engineList),
@@ -616,7 +622,7 @@ func (m AppModel) View() string {
 		}
 	}
 
-	statusBar := components.RenderStatusBar(m.theme, interval, lastPoll, okCount, totalCount, m.width, hints)
+	statusBar := components.RenderStatusBar(renderTheme, interval, lastPoll, okCount, totalCount, m.width, hints)
 
 	// Fill body to the available height between header and status bar
 	bodyHeight := m.height - 1 - 2 // 1 header line, 2 status bar lines
@@ -636,7 +642,7 @@ func (m AppModel) View() string {
 		body = m.switcher.View()
 	}
 
-	filledBody := fillBackground(body, m.width, bodyHeight, m.theme.Base00)
+	filledBody := fillBackground(body, m.width, bodyHeight, renderTheme.Base00)
 	full := lipgloss.JoinVertical(lipgloss.Left, header, filledBody, statusBar)
 	return full
 }

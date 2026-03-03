@@ -115,6 +115,9 @@ func NewSettingsView(theme styles.Theme, cfg *config.Config, provider identity.P
 func (s *SettingsView) SetSize(width, height int) {
 	s.width = width
 	s.height = height
+	if s.showThemePicker {
+		s.themePicker.SetSize(width, height)
+	}
 }
 
 // selectedThemeSlug returns the slug of the currently selected theme.
@@ -444,12 +447,12 @@ func (s SettingsView) renderHelp() string {
 	hint := ""
 	if s.cursor == settingsFieldTheme {
 		hint = fmt.Sprintf(
-			"%s/%s cycle theme  %s/%s navigate  %s save  %s cancel",
+			"%s/%s cycle  %s browse  %s/%s navigate  %s cancel",
 			keyStyle.Render("[left]"),
 			keyStyle.Render("[right]"),
+			keyStyle.Render("[enter]"),
 			keyStyle.Render("[up]"),
 			keyStyle.Render("[down]"),
-			keyStyle.Render("[enter]"),
 			keyStyle.Render("[esc]"),
 		)
 	} else {
