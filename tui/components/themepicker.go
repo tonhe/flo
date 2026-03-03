@@ -56,6 +56,7 @@ func NewThemePickerModel(currentSlug string) ThemePickerModel {
 func (m *ThemePickerModel) SetSize(width, height int) {
 	m.width = width
 	m.height = height
+	m.adjustScroll()
 }
 
 // PreviewTheme returns the theme that is currently highlighted in the list.
@@ -90,12 +91,14 @@ func (m ThemePickerModel) Update(msg tea.Msg) (ThemePickerModel, tea.Cmd, ThemeP
 			if m.cursor > 0 {
 				m.cursor--
 			}
+			m.adjustScroll()
 			return m, nil, ThemePickerNone
 
 		case key.Matches(msg, keys.DefaultKeyMap.Down):
 			if m.cursor < len(m.themes)-1 {
 				m.cursor++
 			}
+			m.adjustScroll()
 			return m, nil, ThemePickerNone
 
 		case key.Matches(msg, keys.DefaultKeyMap.Enter):
@@ -128,17 +131,17 @@ func (m ThemePickerModel) View() string {
 		rightWidth = 30
 	}
 
-	// Adjust scroll offset so the cursor is always visible.
+	// Adjust scroll offset so the cursor is always visible (defensive fallback
+	// for the initial render when height wasn't known at construction time).
 	visibleRows := contentHeight
-	// Reserve rows for scroll indicators if needed.
 	listLen := len(m.themes)
-	m.adjustScroll(visibleRows, listLen)
+	m.adjustScroll()
 
 	// Build the left panel (theme list).
 	leftLines := m.renderThemeList(theme, leftWidth, visibleRows, listLen)
 
 	// Build the right panel (preview).
-	rightLines := m.renderPreviewPanel(theme, rightWidth, visibleRows)
+	rightLines := m.renderPreviewPanel(theme, rightWidth)
 
 	// Pad both panels to the same height.
 	for len(leftLines) < visibleRows {
@@ -189,7 +192,13 @@ func (m ThemePickerModel) View() string {
 }
 
 // adjustScroll ensures the cursor is visible within the scroll window.
-func (m *ThemePickerModel) adjustScroll(visibleRows, listLen int) {
+// It computes visibleRows and listLen internally from the model's state.
+func (m *ThemePickerModel) adjustScroll() {
+	visibleRows := m.height - 5
+	if visibleRows < 3 {
+		visibleRows = 3
+	}
+	listLen := len(m.themes)
 	// Scroll down if cursor is below the visible window.
 	for {
 		topReserve := 0
@@ -318,7 +327,7 @@ func (m ThemePickerModel) renderThemeList(theme styles.Theme, width, visibleRows
 
 // renderPreviewPanel builds the right panel lines showing a sample dashboard
 // rendered in the highlighted theme's colors.
-func (m ThemePickerModel) renderPreviewPanel(theme styles.Theme, width, visibleRows int) []string {
+func (m ThemePickerModel) renderPreviewPanel(theme styles.Theme, width int) []string {
 	bg := theme.Base00
 
 	sepStyle := lipgloss.NewStyle().Foreground(theme.Base03).Background(bg)
