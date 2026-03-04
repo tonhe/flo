@@ -95,6 +95,9 @@ type EditorView struct {
 	picker       components.IdentityPickerModel
 	pickerTarget string // "settings", "host", or "addhost"
 
+	showInterfacePicker bool
+	interfacePicker     components.InterfacePickerModel
+
 	addHostBaseLen int // target count before add-host started
 
 	SavedPath string
@@ -173,6 +176,27 @@ func (e EditorView) Update(msg tea.Msg) (EditorView, tea.Cmd, EditorAction) {
 			}
 		case components.PickerCancelled:
 			e.showPicker = false
+		}
+		return e, cmd, EditorActionNone
+	}
+	if e.showInterfacePicker {
+		var cmd tea.Cmd
+		var action components.InterfacePickerAction
+		e.interfacePicker, cmd, action = e.interfacePicker.Update(msg)
+		switch action {
+		case components.InterfacePickerSelected:
+			if e.mode == modeAddHost {
+				e.targets[len(e.targets)-1].Interfaces = e.interfacePicker.SelectedNames()
+				e.err = ""
+				e.globalCur = edSettingsCount + len(e.targets) - 1
+				e.syncCursorFromGlobal()
+				e.mode = modeMenu
+			} else {
+				e.targets[e.detailHostIdx].Interfaces = e.interfacePicker.SelectedNames()
+			}
+			e.showInterfacePicker = false
+		case components.InterfacePickerCancelled:
+			e.showInterfacePicker = false
 		}
 		return e, cmd, EditorActionNone
 	}
@@ -370,6 +394,9 @@ func (e EditorView) updateHostDetail(msg tea.Msg) (EditorView, tea.Cmd, EditorAc
 				}
 			}
 			return e, nil, EditorActionNone
+
+		case msg.String() == "b":
+			return e.openInterfacePicker(e.detailHostIdx)
 		}
 	}
 	return e, nil, EditorActionNone
@@ -449,6 +476,35 @@ func (e EditorView) updateHostInline(msg tea.Msg) (EditorView, tea.Cmd, EditorAc
 	return e, nil, EditorActionNone
 }
 
+// openInterfacePicker resolves the identity for a target and opens the
+// interface picker overlay. It returns the updated editor, a command, and action.
+func (e EditorView) openInterfacePicker(targetIdx int) (EditorView, tea.Cmd, EditorAction) {
+	host := e.targets[targetIdx].Host
+	if host == "" {
+		e.err = "Enter a host before browsing interfaces"
+		return e, nil, EditorActionNone
+	}
+	identityName := e.targets[targetIdx].Identity
+	if identityName == "" {
+		identityName = e.defaultIdentity
+	}
+	if identityName == "" || e.provider == nil {
+		e.err = "Set an identity before browsing interfaces"
+		return e, nil, EditorActionNone
+	}
+	id, err := e.provider.Get(identityName)
+	if err != nil {
+		e.err = fmt.Sprintf("Identity not found: %v", err)
+		return e, nil, EditorActionNone
+	}
+	picker, cmd := components.NewInterfacePickerModel(e.theme, host, 161, id, e.targets[targetIdx].Interfaces)
+	e.interfacePicker = picker
+	e.interfacePicker.SetSize(e.width, e.height)
+	e.showInterfacePicker = true
+	e.err = ""
+	return e, cmd, EditorActionNone
+}
+
 // --- Add host mode ---
 
 func (e *EditorView) initAddHostInputs() {
@@ -501,22 +557,7 @@ func (e EditorView) updateAddHost(msg tea.Msg) (EditorView, tea.Cmd, EditorActio
 				e.pickerTarget = "addhost"
 				return e, nil, EditorActionNone
 			case 3:
-				if val == "" {
-					e.err = "At least one interface is required"
-					return e, nil, EditorActionNone
-				}
-				var ifaces []string
-				for _, part := range strings.Split(val, ",") {
-					trimmed := strings.TrimSpace(part)
-					if trimmed != "" {
-						ifaces = append(ifaces, trimmed)
-					}
-				}
-				e.targets[len(e.targets)-1].Interfaces = ifaces
-				e.err = ""
-				e.globalCur = edSettingsCount + len(e.targets) - 1
-				e.syncCursorFromGlobal()
-				e.mode = modeMenu
+				return e.openInterfacePicker(len(e.targets) - 1)
 			}
 			return e, nil, EditorActionNone
 		default:
@@ -585,6 +626,9 @@ func (e *EditorView) save() error {
 func (e EditorView) View() string {
 	if e.showPicker {
 		return e.picker.View()
+	}
+	if e.showInterfacePicker {
+		return e.interfacePicker.View()
 	}
 	switch e.mode {
 	case modeMenu, modeInlineEdit:
@@ -762,8 +806,8 @@ func (e EditorView) viewHostDetail() string {
 		s.WriteString("  " + helpStyle.Render(fmt.Sprintf("%s commit  %s cancel",
 			keyStyle.Render("[enter]"), keyStyle.Render("[esc]"))) + "\n")
 	} else {
-		s.WriteString("  " + helpStyle.Render(fmt.Sprintf("%s add interface  %s edit  %s delete  %s back",
-			keyStyle.Render("[a]"), keyStyle.Render("[enter]"), keyStyle.Render("[d]"), keyStyle.Render("[esc]"))) + "\n")
+		s.WriteString("  " + helpStyle.Render(fmt.Sprintf("%s add interface  %s browse  %s edit  %s delete  %s back",
+			keyStyle.Render("[a]"), keyStyle.Render("[b]"), keyStyle.Render("[enter]"), keyStyle.Render("[d]"), keyStyle.Render("[esc]"))) + "\n")
 	}
 	return s.String()
 }

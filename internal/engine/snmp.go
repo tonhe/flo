@@ -19,6 +19,30 @@ const (
 	OIDifOperStatus  = "1.3.6.1.2.1.2.2.1.8"
 )
 
+// Extended SNMP OIDs for detailed interface discovery.
+const (
+	OIDifType       = "1.3.6.1.2.1.2.2.1.3"
+	OIDifAdminStat  = "1.3.6.1.2.1.2.2.1.7"
+	OIDifMtu        = "1.3.6.1.2.1.2.2.1.4"
+	OIDifPhysAddr   = "1.3.6.1.2.1.2.2.1.6"
+	OIDipAdEntIfIdx = "1.3.6.1.2.1.4.20.1.2"
+	OIDipAdEntMask  = "1.3.6.1.2.1.4.20.1.3"
+)
+
+// CDP neighbor discovery OIDs (Cisco-specific).
+const (
+	OIDcdpCacheDevId    = "1.3.6.1.4.1.9.9.23.1.2.1.1.6"
+	OIDcdpCachePort     = "1.3.6.1.4.1.9.9.23.1.2.1.1.7"
+	OIDcdpCachePlatform = "1.3.6.1.4.1.9.9.23.1.2.1.1.8"
+)
+
+// LLDP neighbor discovery OIDs (standard).
+const (
+	OIDlldpRemSysName  = "1.0.8802.1.1.2.1.4.1.1.9"
+	OIDlldpRemPortId   = "1.0.8802.1.1.2.1.4.1.1.7"
+	OIDlldpRemPortDesc = "1.0.8802.1.1.2.1.4.1.1.8"
+)
+
 // NewSNMPClient creates a gosnmp.GoSNMP client configured from an Identity.
 func NewSNMPClient(host string, port int, id *identity.Identity, timeout time.Duration) (*gosnmp.GoSNMP, error) {
 	if port == 0 {

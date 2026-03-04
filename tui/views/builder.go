@@ -77,6 +77,10 @@ type BuilderView struct {
 	showPicker   bool
 	picker       components.IdentityPickerModel
 	pickerTarget string // "step1" or "step2"
+
+	// Interface picker overlay
+	showInterfacePicker bool
+	interfacePicker     components.InterfacePickerModel
 }
 
 // step1 field count
@@ -142,7 +146,7 @@ func NewBuilderView(theme styles.Theme, provider identity.Provider) BuilderView 
 	b.targetIdentity.Width = 40
 
 	b.interfacesInput = textinput.New()
-	b.interfacesInput.Placeholder = "Gi0/0, Gi0/1, Eth1"
+	b.interfacesInput.Placeholder = "Gi0/0, Gi0/1 (enter to browse)"
 	b.interfacesInput.CharLimit = 256
 	b.interfacesInput.Width = 40
 
@@ -498,6 +502,21 @@ func (b BuilderView) updateStepTargets(msg tea.Msg) (BuilderView, tea.Cmd, Build
 		return b, cmd, BuilderActionNone
 	}
 
+	if b.showInterfacePicker {
+		var cmd tea.Cmd
+		var action components.InterfacePickerAction
+		b.interfacePicker, cmd, action = b.interfacePicker.Update(msg)
+		switch action {
+		case components.InterfacePickerSelected:
+			names := b.interfacePicker.SelectedNames()
+			b.interfacesInput.SetValue(strings.Join(names, ", "))
+			b.showInterfacePicker = false
+		case components.InterfacePickerCancelled:
+			b.showInterfacePicker = false
+		}
+		return b, cmd, BuilderActionNone
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
@@ -536,13 +555,48 @@ func (b BuilderView) updateStepTargets(msg tea.Msg) (BuilderView, tea.Cmd, Build
 
 		case msg.String() == "enter":
 			if b.addingTarget {
-				// If on the identity field, open the picker
+				// If on the identity field, open the identity picker
 				if b.step2Focus == 2 {
 					b.picker = components.NewIdentityPickerModel(b.theme, b.provider)
 					b.picker.SetSize(b.width, b.height)
 					b.showPicker = true
 					b.pickerTarget = "step2"
 					return b, nil, BuilderActionNone
+				}
+				// If on the interfaces field, open the interface picker
+				if b.step2Focus == 3 {
+					host := strings.TrimSpace(b.hostInput.Value())
+					if host == "" {
+						b.err = "Enter a host before browsing interfaces"
+						return b, nil, BuilderActionNone
+					}
+					identityName := strings.TrimSpace(b.targetIdentity.Value())
+					if identityName == "" {
+						identityName = strings.TrimSpace(b.identityInput.Value())
+					}
+					if identityName == "" {
+						b.err = "Set an identity before browsing interfaces"
+						return b, nil, BuilderActionNone
+					}
+					id, err := b.provider.Get(identityName)
+					if err != nil {
+						b.err = fmt.Sprintf("Identity not found: %v", err)
+						return b, nil, BuilderActionNone
+					}
+					var preSelected []string
+					if raw := strings.TrimSpace(b.interfacesInput.Value()); raw != "" {
+						for _, part := range strings.Split(raw, ",") {
+							if trimmed := strings.TrimSpace(part); trimmed != "" {
+								preSelected = append(preSelected, trimmed)
+							}
+						}
+					}
+					picker, cmd := components.NewInterfacePickerModel(b.theme, host, 161, id, preSelected)
+					b.interfacePicker = picker
+					b.interfacePicker.SetSize(b.width, b.height)
+					b.showInterfacePicker = true
+					b.err = ""
+					return b, cmd, BuilderActionNone
 				}
 				// If not on last field, advance focus
 				if b.step2Focus < step2Fields-1 {
@@ -684,6 +738,9 @@ func (b BuilderView) updateStepTargets(msg tea.Msg) (BuilderView, tea.Cmd, Build
 func (b BuilderView) viewStepTargets() string {
 	if b.showPicker {
 		return b.picker.View()
+	}
+	if b.showInterfacePicker {
+		return b.interfacePicker.View()
 	}
 
 	titleStyle := lipgloss.NewStyle().
@@ -827,6 +884,15 @@ func (b BuilderView) renderStep2Help() string {
 	keyStyle := lipgloss.NewStyle().Foreground(b.theme.Base0D).Bold(true)
 
 	if b.addingTarget {
+		if b.step2Focus == 3 {
+			return helpStyle.Render(fmt.Sprintf(
+				"%s/%s navigate  %s browse interfaces  %s cancel",
+				keyStyle.Render("[tab]"),
+				keyStyle.Render("[shift+tab]"),
+				keyStyle.Render("[enter]"),
+				keyStyle.Render("[esc]"),
+			))
+		}
 		return helpStyle.Render(fmt.Sprintf(
 			"%s/%s navigate  %s next/commit  %s cancel",
 			keyStyle.Render("[tab]"),
