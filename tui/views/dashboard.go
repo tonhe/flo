@@ -325,12 +325,19 @@ func (v DashboardView) renderInterfaceRow(
 ) string {
 	// Base row style (normal or selected)
 	rowStyle := v.sty.TableRow
+	selBg := v.theme.Base01 // subtle line-highlight background for selected row
 	if selected {
 		rowStyle = v.sty.TableRowSel
 	}
 
-	// Device label
-	device := rowStyle.Render(padRight(truncate(deviceLabel, wDevice-1), wDevice))
+	// Device label with cursor indicator
+	var device string
+	if selected {
+		indicator := lipgloss.NewStyle().Foreground(v.theme.Base0D).Background(selBg).Render("▸")
+		device = indicator + rowStyle.Render(padRight(truncate(deviceLabel, wDevice-2), wDevice-1))
+	} else {
+		device = rowStyle.Render(padRight(" "+truncate(deviceLabel, wDevice-2), wDevice))
+	}
 
 	// Interface name
 	ifName := rowStyle.Render(padRight(truncate(iface.Name, wIface-1), wIface))
@@ -342,25 +349,25 @@ func (v DashboardView) renderInterfaceRow(
 	case "":
 		st := lipgloss.NewStyle().Foreground(v.theme.Base04)
 		if selected {
-			st = st.Background(v.theme.Base02)
+			st = st.Background(selBg)
 		}
 		statusStr = st.Render(padRight("...", wStatus))
 	case "up":
 		st := v.sty.StatusUp
 		if selected {
-			st = st.Background(v.theme.Base02)
+			st = st.Background(selBg)
 		}
 		statusStr = st.Render(padRight("up", wStatus))
 	case "down":
 		st := v.sty.StatusDown
 		if selected {
-			st = st.Background(v.theme.Base02)
+			st = st.Background(selBg)
 		}
 		statusStr = st.Render(padRight("down", wStatus))
 	default:
 		st := v.sty.StatusWarn
 		if selected {
-			st = st.Background(v.theme.Base02)
+			st = st.Background(selBg)
 		}
 		statusStr = st.Render(padRight(iface.Status, wStatus))
 	}
@@ -385,19 +392,19 @@ func (v DashboardView) renderInterfaceRow(
 		case iface.Utilization >= 80:
 			st := v.sty.UtilHigh
 			if selected {
-				st = st.Background(v.theme.Base02)
+				st = st.Background(selBg)
 			}
 			utilStr = st.Render(padLeft(utilText, wUtil))
 		case iface.Utilization >= 50:
 			st := v.sty.UtilMid
 			if selected {
-				st = st.Background(v.theme.Base02)
+				st = st.Background(selBg)
 			}
 			utilStr = st.Render(padLeft(utilText, wUtil))
 		default:
 			st := v.sty.UtilLow
 			if selected {
-				st = st.Background(v.theme.Base02)
+				st = st.Background(selBg)
 			}
 			utilStr = st.Render(padLeft(utilText, wUtil))
 		}
@@ -408,7 +415,7 @@ func (v DashboardView) renderInterfaceRow(
 	sparkStr := components.Sparkline(sparkData, wSpark)
 	sparkStyle := v.sty.SparklineStyle
 	if selected {
-		sparkStyle = sparkStyle.Background(v.theme.Base02)
+		sparkStyle = sparkStyle.Background(selBg)
 	}
 	sparkRendered := sparkStyle.Render(sparkStr)
 
