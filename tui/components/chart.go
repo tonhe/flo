@@ -401,7 +401,9 @@ func renderTimeAxis(timestamps []time.Time, chartWidth, labelWidth, totalWidth i
 		dataOffset = 0
 	}
 
-	// Place labels at evenly-spaced positions within the data range
+	// Place labels at evenly-spaced positions within the data range.
+	// Track the end of the last placed label to prevent overlap.
+	lastEnd := -1
 	for i := 0; i < numLabels; i++ {
 		var dataIdx int
 		if numLabels == 1 {
@@ -427,10 +429,16 @@ func renderTimeAxis(timestamps []time.Time, chartWidth, labelWidth, totalWidth i
 			continue // label doesn't fit
 		}
 
+		// Skip if this label would overlap the previous one (need 2-char gap)
+		if startPos <= lastEnd+2 {
+			continue
+		}
+
 		// Write label into axis buffer
 		for j := 0; j < len(label) && startPos+j < chartWidth; j++ {
 			axis[startPos+j] = label[j]
 		}
+		lastEnd = startPos + len(label) - 1
 	}
 
 	// Build the full line: label-width padding + axis
