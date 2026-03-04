@@ -366,11 +366,7 @@ func (v DashboardView) renderEmpty() string {
 		msgStyle.Render("No dashboard loaded"),
 		"",
 		msgStyle.Render(fmt.Sprintf(
-			"Press %s to create a new dashboard",
-			keyStyle.Render("[n]"),
-		)),
-		msgStyle.Render(fmt.Sprintf(
-			"or %s to open an existing one",
+			"Press %s to open or create a dashboard",
 			keyStyle.Render("[d]"),
 		)),
 		"",

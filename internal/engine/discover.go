@@ -115,12 +115,19 @@ type DetailedInterface struct {
 
 // DiscoverDetailedInterfaces performs an extended SNMP discovery, fetching
 // all base interface data plus type, admin status, MTU, MAC, IP addresses,
-// and CDP/LLDP neighbors.
-func DiscoverDetailedInterfaces(host string, port int, id *identity.Identity) ([]DetailedInterface, error) {
-	client, err := NewSNMPClient(host, port, id, 15*time.Second)
+// and CDP/LLDP neighbors. The optional progress callback is called with a
+// status string for each phase of the discovery so the UI can show progress.
+func DiscoverDetailedInterfaces(host string, port int, id *identity.Identity, progress func(string)) ([]DetailedInterface, error) {
+	if progress == nil {
+		progress = func(string) {}
+	}
+
+	progress("Connecting...")
+	client, err := NewSNMPClient(host, port, id, 5*time.Second)
 	if err != nil {
 		return nil, err
 	}
+	client.Retries = 1
 	if err := client.Connect(); err != nil {
 		return nil, fmt.Errorf("connect to %s: %w", host, err)
 	}
@@ -128,7 +135,8 @@ func DiscoverDetailedInterfaces(host string, port int, id *identity.Identity) ([
 
 	interfaces := make(map[int]*DetailedInterface)
 
-	// Phase 1: base discovery (same OIDs as DiscoverInterfaces)
+	// Phase 1: base discovery
+	progress("Discovering interface names...")
 	walkOID(client, OIDifName, func(idx int, val string) {
 		if _, ok := interfaces[idx]; !ok {
 			interfaces[idx] = &DetailedInterface{}
@@ -137,6 +145,7 @@ func DiscoverDetailedInterfaces(host string, port int, id *identity.Identity) ([
 		interfaces[idx].Name = val
 	})
 
+	progress("Reading descriptions...")
 	walkOID(client, OIDifDescr, func(idx int, val string) {
 		if iface, ok := interfaces[idx]; ok && iface.Name == "" {
 			iface.Name = val
@@ -152,6 +161,7 @@ func DiscoverDetailedInterfaces(host string, port int, id *identity.Identity) ([
 		}
 	})
 
+	progress("Reading speeds and status...")
 	walkOID(client, OIDifHighSpeed, func(idx int, val string) {
 		if iface, ok := interfaces[idx]; ok {
 			speed, _ := strconv.ParseUint(val, 10, 64)
@@ -174,6 +184,7 @@ func DiscoverDetailedInterfaces(host string, port int, id *identity.Identity) ([
 	})
 
 	// Phase 2: extended attributes
+	progress("Reading interface details...")
 	walkOID(client, OIDifAdminStat, func(idx int, val string) {
 		if iface, ok := interfaces[idx]; ok {
 			v, _ := strconv.Atoi(val)
@@ -212,6 +223,7 @@ func DiscoverDetailedInterfaces(host string, port int, id *identity.Identity) ([
 	})
 
 	// Phase 3: IP addresses
+	progress("Reading IP addresses...")
 	ipToIfIndex := make(map[string]int)
 	walkOIDMultiIndex(client, OIDipAdEntIfIdx, func(suffix string, val string) {
 		ifIdx, _ := strconv.Atoi(val)
@@ -233,70 +245,94 @@ func DiscoverDetailedInterfaces(host string, port int, id *identity.Identity) ([
 		}
 	}
 
-	// Phase 4: CDP neighbors (best-effort)
-	cdpDevices := make(map[string]string)
-	walkOIDMultiIndex(client, OIDcdpCacheDevId, func(suffix string, val string) {
-		cdpDevices[suffix] = val
-	})
-	cdpPorts := make(map[string]string)
-	walkOIDMultiIndex(client, OIDcdpCachePort, func(suffix string, val string) {
-		cdpPorts[suffix] = val
-	})
-	cdpPlatforms := make(map[string]string)
-	walkOIDMultiIndex(client, OIDcdpCachePlatform, func(suffix string, val string) {
-		cdpPlatforms[suffix] = val
-	})
+	// Phase 4: CDP neighbors (best-effort, short timeout)
+	progress("Checking CDP neighbors...")
+	cdpClient, cdpErr := NewSNMPClient(host, port, id, 3*time.Second)
+	if cdpErr == nil {
+		cdpClient.Retries = 0
+		if cdpErr = cdpClient.Connect(); cdpErr == nil {
+			defer cdpClient.Conn.Close()
 
-	for suffix, deviceID := range cdpDevices {
-		parts := strings.SplitN(suffix, ".", 2)
-		if len(parts) < 1 {
-			continue
-		}
-		ifIdx, _ := strconv.Atoi(parts[0])
-		if iface, ok := interfaces[ifIdx]; ok {
-			iface.Neighbors = append(iface.Neighbors, NeighborInfo{
-				Protocol:   "CDP",
-				DeviceID:   deviceID,
-				RemotePort: cdpPorts[suffix],
-				Platform:   cdpPlatforms[suffix],
+			cdpDevices := make(map[string]string)
+			walkOIDMultiIndex(cdpClient, OIDcdpCacheDevId, func(suffix string, val string) {
+				cdpDevices[suffix] = val
 			})
-		}
-	}
 
-	// Phase 5: LLDP neighbors (best-effort)
-	lldpNames := make(map[string]string)
-	walkOIDMultiIndex(client, OIDlldpRemSysName, func(suffix string, val string) {
-		lldpNames[suffix] = val
-	})
-	lldpPortIds := make(map[string]string)
-	walkOIDMultiIndex(client, OIDlldpRemPortId, func(suffix string, val string) {
-		lldpPortIds[suffix] = val
-	})
-	lldpPortDescs := make(map[string]string)
-	walkOIDMultiIndex(client, OIDlldpRemPortDesc, func(suffix string, val string) {
-		lldpPortDescs[suffix] = val
-	})
+			if len(cdpDevices) > 0 {
+				cdpPorts := make(map[string]string)
+				walkOIDMultiIndex(cdpClient, OIDcdpCachePort, func(suffix string, val string) {
+					cdpPorts[suffix] = val
+				})
+				cdpPlatforms := make(map[string]string)
+				walkOIDMultiIndex(cdpClient, OIDcdpCachePlatform, func(suffix string, val string) {
+					cdpPlatforms[suffix] = val
+				})
 
-	for suffix, sysName := range lldpNames {
-		// LLDP suffix format: timeMark.localPortNum.remIndex
-		parts := strings.SplitN(suffix, ".", 3)
-		if len(parts) < 2 {
-			continue
-		}
-		localPort, _ := strconv.Atoi(parts[1])
-		if iface, ok := interfaces[localPort]; ok {
-			remPort := lldpPortDescs[suffix]
-			if remPort == "" {
-				remPort = lldpPortIds[suffix]
+				for suffix, deviceID := range cdpDevices {
+					parts := strings.SplitN(suffix, ".", 2)
+					if len(parts) < 1 {
+						continue
+					}
+					ifIdx, _ := strconv.Atoi(parts[0])
+					if iface, ok := interfaces[ifIdx]; ok {
+						iface.Neighbors = append(iface.Neighbors, NeighborInfo{
+							Protocol:   "CDP",
+							DeviceID:   deviceID,
+							RemotePort: cdpPorts[suffix],
+							Platform:   cdpPlatforms[suffix],
+						})
+					}
+				}
 			}
-			iface.Neighbors = append(iface.Neighbors, NeighborInfo{
-				Protocol:   "LLDP",
-				DeviceID:   sysName,
-				RemotePort: remPort,
-			})
 		}
 	}
 
+	// Phase 5: LLDP neighbors (best-effort, short timeout)
+	progress("Checking LLDP neighbors...")
+	lldpClient, lldpErr := NewSNMPClient(host, port, id, 3*time.Second)
+	if lldpErr == nil {
+		lldpClient.Retries = 0
+		if lldpErr = lldpClient.Connect(); lldpErr == nil {
+			defer lldpClient.Conn.Close()
+
+			lldpNames := make(map[string]string)
+			walkOIDMultiIndex(lldpClient, OIDlldpRemSysName, func(suffix string, val string) {
+				lldpNames[suffix] = val
+			})
+
+			if len(lldpNames) > 0 {
+				lldpPortIds := make(map[string]string)
+				walkOIDMultiIndex(lldpClient, OIDlldpRemPortId, func(suffix string, val string) {
+					lldpPortIds[suffix] = val
+				})
+				lldpPortDescs := make(map[string]string)
+				walkOIDMultiIndex(lldpClient, OIDlldpRemPortDesc, func(suffix string, val string) {
+					lldpPortDescs[suffix] = val
+				})
+
+				for suffix, sysName := range lldpNames {
+					parts := strings.SplitN(suffix, ".", 3)
+					if len(parts) < 2 {
+						continue
+					}
+					localPort, _ := strconv.Atoi(parts[1])
+					if iface, ok := interfaces[localPort]; ok {
+						remPort := lldpPortDescs[suffix]
+						if remPort == "" {
+							remPort = lldpPortIds[suffix]
+						}
+						iface.Neighbors = append(iface.Neighbors, NeighborInfo{
+							Protocol:   "LLDP",
+							DeviceID:   sysName,
+							RemotePort: remPort,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	progress("Done")
 	result := make([]DetailedInterface, 0, len(interfaces))
 	for _, iface := range interfaces {
 		result = append(result, *iface)

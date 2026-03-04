@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -29,6 +30,16 @@ type InterfaceDiscoverMsg struct {
 	Interfaces []engine.DetailedInterface
 	Err        error
 }
+
+// InterfaceProgressMsg carries a progress update from the discovery goroutine.
+type InterfaceProgressMsg struct {
+	Status string
+}
+
+// ifPickerSpinnerMsg triggers a spinner frame update.
+type ifPickerSpinnerMsg struct{}
+
+var ifPickerSpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 type ifPickerSortMode int
 
@@ -80,8 +91,11 @@ type InterfacePickerModel struct {
 	sortMode    ifPickerSortMode
 
 	// Loading state
-	loading    bool
-	loadingErr error
+	loading       bool
+	loadingErr    error
+	loadingStatus string // current phase description
+	spinnerFrame  int
+	progressCh    chan string // receives status updates from discovery goroutine
 
 	// SNMP connection info
 	host     string
@@ -101,24 +115,27 @@ func NewInterfacePickerModel(
 	sty := styles.NewStyles(theme)
 
 	fi := textinput.New()
-	fi.Placeholder = "filter interfaces..."
+	fi.Placeholder = "search by name, description, IP, neighbor..."
 	fi.CharLimit = 64
 	fi.Width = 30
 
 	m := InterfacePickerModel{
-		theme:       theme,
-		sty:         sty,
-		selected:    make(map[int]bool),
-		preSelected: preSelected,
-		loading:     true,
-		host:        host,
-		port:        port,
-		identity:    id,
-		sortMode:    ifSortByIndex,
-		filterInput: fi,
+		theme:         theme,
+		sty:           sty,
+		selected:      make(map[int]bool),
+		preSelected:   preSelected,
+		loading:       true,
+		loadingStatus: "Connecting...",
+		progressCh:    make(chan string, 8),
+		host:          host,
+		port:          port,
+		identity:      id,
+		sortMode:      ifSortByIndex,
+		showUpOnly:    true,
+		filterInput:   fi,
 	}
 
-	cmd := m.discoverCmd()
+	cmd := tea.Batch(m.discoverCmd(), ifPickerSpinnerCmd())
 	return m, cmd
 }
 
@@ -126,10 +143,24 @@ func (m InterfacePickerModel) discoverCmd() tea.Cmd {
 	host := m.host
 	port := m.port
 	id := m.identity
+	progressCh := m.progressCh
 	return func() tea.Msg {
-		ifaces, err := engine.DiscoverDetailedInterfaces(host, port, id)
+		progress := func(status string) {
+			// Non-blocking send so discovery never stalls on a full channel.
+			select {
+			case progressCh <- status:
+			default:
+			}
+		}
+		ifaces, err := engine.DiscoverDetailedInterfaces(host, port, id, progress)
 		return InterfaceDiscoverMsg{Interfaces: ifaces, Err: err}
 	}
+}
+
+func ifPickerSpinnerCmd() tea.Cmd {
+	return tea.Tick(80*time.Millisecond, func(t time.Time) tea.Msg {
+		return ifPickerSpinnerMsg{}
+	})
 }
 
 // SetSize updates the available terminal dimensions.
@@ -167,6 +198,25 @@ func (m InterfacePickerModel) Update(msg tea.Msg) (InterfacePickerModel, tea.Cmd
 		return m, nil, InterfacePickerNone
 	}
 
+	// Handle spinner tick — advance frame and drain progress channel
+	if _, ok := msg.(ifPickerSpinnerMsg); ok {
+		if m.loading {
+			m.spinnerFrame = (m.spinnerFrame + 1) % len(ifPickerSpinnerFrames)
+			// Drain any pending progress updates (use latest)
+			for {
+				select {
+				case status := <-m.progressCh:
+					m.loadingStatus = status
+				default:
+					goto drained
+				}
+			}
+		drained:
+			return m, ifPickerSpinnerCmd(), InterfacePickerNone
+		}
+		return m, nil, InterfacePickerNone
+	}
+
 	// Handle window resize
 	if wmsg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = wmsg.Width
@@ -194,7 +244,9 @@ func (m InterfacePickerModel) Update(msg tea.Msg) (InterfacePickerModel, tea.Cmd
 			case kmsg.String() == "r":
 				m.loading = true
 				m.loadingErr = nil
-				return m, m.discoverCmd(), InterfacePickerNone
+				m.loadingStatus = "Connecting..."
+				m.progressCh = make(chan string, 8)
+				return m, tea.Batch(m.discoverCmd(), ifPickerSpinnerCmd()), InterfacePickerNone
 			}
 		}
 		return m, nil, InterfacePickerNone
@@ -518,14 +570,14 @@ func (m InterfacePickerModel) renderInterfaceList(width, totalHeight int) []stri
 	} else {
 		filterText := m.filterInput.Value()
 		if filterText == "" {
-			filterText = "(/ to filter)"
+			filterText = "/ to search"
 		}
 		lines = append(lines, bgStyle.Render("  ")+dimStyle.Render(filterText))
 	}
 
 	// Up-only indicator
 	if m.showUpOnly {
-		lines = append(lines, bgStyle.Render("  ")+dimStyle.Render("[showing up only]"))
+		lines = append(lines, bgStyle.Render("  ")+dimStyle.Render("[up only - press u to show all]"))
 	}
 
 	visibleRows := totalHeight - len(lines)
@@ -732,12 +784,25 @@ func (m InterfacePickerModel) renderHelp() string {
 func (m InterfacePickerModel) viewLoading() string {
 	theme := m.theme
 	bg := theme.Base00
-	style := lipgloss.NewStyle().Foreground(theme.Base0D)
+	spinnerStyle := lipgloss.NewStyle().Foreground(theme.Base0D).Bold(true)
+	titleStyle := lipgloss.NewStyle().Foreground(theme.Base05)
+	statusStyle := lipgloss.NewStyle().Foreground(theme.Base0C)
 	dimStyle := lipgloss.NewStyle().Foreground(theme.Base04)
+
+	frame := ifPickerSpinnerFrames[m.spinnerFrame%len(ifPickerSpinnerFrames)]
+	spinnerLine := spinnerStyle.Render(frame) + titleStyle.Render(" Discovering interfaces...")
+	hostLine := dimStyle.Render(fmt.Sprintf("Host: %s:%d", m.host, m.port))
+
+	statusLine := ""
+	if m.loadingStatus != "" {
+		statusLine = statusStyle.Render(m.loadingStatus)
+	}
+
 	content := lipgloss.JoinVertical(lipgloss.Center,
-		style.Render("Discovering interfaces..."),
+		spinnerLine,
 		"",
-		dimStyle.Render(fmt.Sprintf("Connecting to %s:%d", m.host, m.port)),
+		hostLine,
+		statusLine,
 		"",
 		dimStyle.Render("[esc] cancel"),
 	)

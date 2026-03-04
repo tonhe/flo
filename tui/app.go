@@ -51,7 +51,6 @@ type AppModel struct {
 	builder    views.BuilderView
 	editor     views.EditorView
 	settings   views.SettingsView
-	help       views.HelpView
 	width      int
 	height     int
 	activeDash    string
@@ -78,7 +77,6 @@ func NewAppModel(cfg *config.Config, mgr *engine.Manager, provider identity.Prov
 		switcher:      views.NewSwitcherView(theme),
 		detail:        views.NewDetailView(theme),
 		identity:      views.NewIdentityView(theme, provider),
-		help:          views.NewHelpView(theme),
 		startDashName: startDash,
 		storePath:     storePath,
 	}
@@ -138,7 +136,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.builder.SetSize(msg.Width, bodyHeight)
 		m.editor.SetSize(msg.Width, bodyHeight)
 		m.settings.SetSize(msg.Width, bodyHeight)
-		m.help.SetSize(msg.Width, bodyHeight)
 		return m, nil
 
 	case TickMsg:
@@ -159,14 +156,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tickCmd()
 
 	case tea.KeyMsg:
-		// Help overlay intercepts all keys when visible
-		if m.help.IsVisible() {
-			if key.Matches(msg, keys.DefaultKeyMap.Help) || key.Matches(msg, keys.DefaultKeyMap.Escape) {
-				m.help.Toggle()
-			}
-			return m, nil
-		}
-
 		// Confirm-to-quit dialog intercepts all keys when visible
 		if m.confirmQuit {
 			switch msg.String() {
@@ -184,14 +173,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, keys.DefaultKeyMap.Quit):
 			return m.tryQuit()
-		case key.Matches(msg, keys.DefaultKeyMap.Help):
-			bodyHeight := m.height - 3
-			if bodyHeight < 1 {
-				bodyHeight = 1
-			}
-			m.help.SetSize(m.width, bodyHeight)
-			m.help.Toggle()
-			return m, nil
 		}
 
 		// State-specific key handling
@@ -207,31 +188,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refreshSwitcher()
 				return m, nil
 			}
-			// Open the identity manager on 'i'
-			if key.Matches(msg, keys.DefaultKeyMap.Identity) {
-				m.identity.SetSize(m.width, m.height-3)
-				m.identity.SetStorePath(m.storePath)
-				m.identity.SetOnStoreCreated(func(p identity.Provider) {
-					m.provider = p
-				})
-				m.identity.Refresh()
-				m.state = StateIdentity
-				return m, nil
-			}
-			// Create new dashboard on 'n'
-			if msg.String() == "n" {
-				m.builder = views.NewBuilderView(m.theme, m.provider)
-				m.builder.SetSize(m.width, m.height-3)
-				m.state = StateBuilder
-				return m, nil
-			}
-			// Open the dashboard editor on 'e'
-			if key.Matches(msg, keys.DefaultKeyMap.Edit) {
-				if m.activeDash != "" {
-					m.editActiveDashboard()
-				}
-				return m, nil
-			}
 			// Open settings on 's'
 			if key.Matches(msg, keys.DefaultKeyMap.Settings) {
 				m.settings = views.NewSettingsView(m.theme, m.config, m.provider)
@@ -239,23 +195,29 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = StateSettings
 				return m, nil
 			}
-			// Force refresh on 'r'
-			if key.Matches(msg, keys.DefaultKeyMap.Refresh) {
-				if m.activeDash != "" {
+			// The following keys only work when a dashboard is loaded
+			if m.activeDash != "" {
+				// Open the dashboard editor on 'e'
+				if key.Matches(msg, keys.DefaultKeyMap.Edit) {
+					m.editActiveDashboard()
+					return m, nil
+				}
+				// Force refresh on 'r'
+				if key.Matches(msg, keys.DefaultKeyMap.Refresh) {
 					if snap := m.manager.TryGetSnapshot(m.activeDash); snap != nil {
 						m.dashboard.SetSnapshot(snap)
 					}
+					return m, nil
 				}
-				return m, nil
-			}
-			// Open detail view on Enter
-			if key.Matches(msg, keys.DefaultKeyMap.Enter) {
-				label, iface := m.dashboard.SelectedInterface()
-				if iface != nil {
-					m.detail.SetInterface(label, iface)
-					m.state = StateDetail
+				// Open detail view on Enter
+				if key.Matches(msg, keys.DefaultKeyMap.Enter) {
+					label, iface := m.dashboard.SelectedInterface()
+					if iface != nil {
+						m.detail.SetInterface(label, iface)
+						m.state = StateDetail
+					}
+					return m, nil
 				}
-				return m, nil
 			}
 			var cmd tea.Cmd
 			m.dashboard, cmd = m.dashboard.Update(msg)
@@ -385,8 +347,6 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.detail.SetSize(m.width, bodyHeight)
 					m.identity = views.NewIdentityView(m.theme, m.provider)
 					m.identity.SetSize(m.width, bodyHeight)
-					m.help = views.NewHelpView(m.theme)
-					m.help.SetSize(m.width, bodyHeight)
 				}
 				m.state = StateDashboard
 				return m, nil
@@ -414,6 +374,53 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case views.EditorActionClose:
 				m.state = StateDashboard
 				return m, nil
+			}
+			return m, cmd
+		}
+
+	default:
+		// Forward non-key messages (spinner ticks, async results, etc.)
+		// to views that host async sub-components.
+		switch m.state {
+		case StateBuilder:
+			var cmd tea.Cmd
+			var action views.BuilderAction
+			m.builder, cmd, action = m.builder.Update(msg)
+			if action == views.BuilderActionSave {
+				path := m.builder.SavedPath
+				if dash, err := dashboard.LoadDashboard(path); err == nil {
+					if m.activeDash != "" {
+						_ = m.manager.Stop(m.activeDash)
+					}
+					if m.provider != nil {
+						_ = m.manager.Start(dash, m.provider)
+					}
+					m.activeDash = dash.Name
+				}
+				m.state = StateDashboard
+			} else if action == views.BuilderActionClose {
+				m.state = StateDashboard
+			}
+			return m, cmd
+
+		case StateEditor:
+			var cmd tea.Cmd
+			var action views.EditorAction
+			m.editor, cmd, action = m.editor.Update(msg)
+			if action == views.EditorActionSaved {
+				path := m.editor.SavedPath
+				if dash, loadErr := dashboard.LoadDashboard(path); loadErr == nil {
+					if m.activeDash != "" {
+						_ = m.manager.Stop(m.activeDash)
+					}
+					if m.provider != nil {
+						_ = m.manager.Start(dash, m.provider)
+					}
+					m.activeDash = dash.Name
+				}
+				m.state = StateDashboard
+			} else if action == views.EditorActionClose {
+				m.state = StateDashboard
 			}
 			return m, cmd
 		}
@@ -591,34 +598,40 @@ func (m AppModel) View() string {
 	switch m.state {
 	case StateDashboard:
 		hints = []components.KeyHint{
-			{"enter", "detail"}, {"d", "dashboards"}, {"n", "new"},
-			{"i", "identities"}, {"e", "edit"}, {"s", "settings"},
-			{"r", "refresh"}, {"?", "help"}, {"q", "quit"},
+			{"d", "dashboards"}, {"s", "settings"},
 		}
+		if m.activeDash != "" {
+			hints = append(hints,
+				components.KeyHint{Key: "enter", Desc: "detail"},
+				components.KeyHint{Key: "e", Desc: "edit"},
+				components.KeyHint{Key: "r", Desc: "refresh"},
+			)
+		}
+		hints = append(hints, components.KeyHint{Key: "q", Desc: "quit"})
 	case StateDetail:
 		hints = []components.KeyHint{
-			{"esc", "back"}, {"?", "help"}, {"q", "quit"},
+			{"esc", "back"}, {"q", "quit"},
 		}
 	case StateSwitcher:
 		hints = []components.KeyHint{
 			{"enter", "switch"}, {"n", "new"}, {"e", "edit"},
-			{"x", "stop"}, {"esc", "close"}, {"?", "help"}, {"q", "quit"},
+			{"x", "stop"}, {"esc", "close"}, {"q", "quit"},
 		}
 	case StateIdentity:
 		hints = []components.KeyHint{
-			{"esc", "back"}, {"?", "help"}, {"ctrl+c", "quit"},
+			{"esc", "back"}, {"ctrl+c", "quit"},
 		}
 	case StateBuilder:
 		hints = []components.KeyHint{
-			{"esc", "cancel"}, {"?", "help"}, {"ctrl+c", "quit"},
+			{"esc", "cancel"}, {"ctrl+c", "quit"},
 		}
 	case StateEditor:
 		hints = []components.KeyHint{
-			{"esc", "save & close"}, {"?", "help"}, {"ctrl+c", "quit"},
+			{"esc", "save & close"}, {"ctrl+c", "quit"},
 		}
 	case StateSettings:
 		hints = []components.KeyHint{
-			{"esc", "cancel"}, {"?", "help"}, {"ctrl+c", "quit"},
+			{"esc", "back"}, {"ctrl+c", "quit"},
 		}
 	}
 
@@ -636,8 +649,6 @@ func (m AppModel) View() string {
 	// width x bodyHeight.
 	if m.confirmQuit {
 		body = m.renderQuitConfirm(renderTheme)
-	} else if m.help.IsVisible() {
-		body = m.help.View()
 	} else if m.state == StateSwitcher {
 		body = m.switcher.View()
 	}

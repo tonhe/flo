@@ -66,9 +66,10 @@ type SettingsView struct {
 	themePicker     components.ThemePickerModel
 
 	// State
-	changed   bool
-	err       string
-	SavedTheme string // theme slug after save, so the app can apply it
+	changed      bool
+	confirmClose bool   // show "save changes?" dialog
+	err          string
+	SavedTheme   string // theme slug after save, so the app can apply it
 }
 
 // NewSettingsView creates a fresh SettingsView populated from the current config.
@@ -164,8 +165,41 @@ func (s *SettingsView) focusInput() {
 	}
 }
 
+// hasChanges returns true if any setting differs from the persisted config.
+func (s SettingsView) hasChanges() bool {
+	if s.selectedThemeSlug() != s.config.Theme {
+		return true
+	}
+	if strings.TrimSpace(s.identityInput.Value()) != s.config.DefaultIdentity {
+		return true
+	}
+	if strings.TrimSpace(s.intervalInput.Value()) != s.config.PollInterval.String() {
+		return true
+	}
+	if strings.TrimSpace(s.historyInput.Value()) != strconv.Itoa(s.config.MaxHistory) {
+		return true
+	}
+	return false
+}
+
 // Update handles messages for the settings view.
 func (s SettingsView) Update(msg tea.Msg) (SettingsView, tea.Cmd, SettingsAction) {
+	// Save confirmation dialog intercepts all keys
+	if s.confirmClose {
+		if kmsg, ok := msg.(tea.KeyMsg); ok {
+			switch kmsg.String() {
+			case "y":
+				return s.save()
+			case "n":
+				return s, nil, SettingsClose
+			case "esc":
+				s.confirmClose = false
+				return s, nil, SettingsNone
+			}
+		}
+		return s, nil, SettingsNone
+	}
+
 	if s.showPicker {
 		var cmd tea.Cmd
 		var action components.PickerAction
@@ -205,6 +239,10 @@ func (s SettingsView) Update(msg tea.Msg) (SettingsView, tea.Cmd, SettingsAction
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, keys.DefaultKeyMap.Escape):
+			if s.hasChanges() {
+				s.confirmClose = true
+				return s, nil, SettingsNone
+			}
 			return s, nil, SettingsClose
 
 		case key.Matches(msg, keys.DefaultKeyMap.Enter):
@@ -363,6 +401,9 @@ func (s SettingsView) save() (SettingsView, tea.Cmd, SettingsAction) {
 
 // View renders the settings screen.
 func (s SettingsView) View() string {
+	if s.confirmClose {
+		return s.viewConfirmClose()
+	}
 	if s.showThemePicker {
 		return s.themePicker.View()
 	}
@@ -466,5 +507,25 @@ func (s SettingsView) renderHelp() string {
 	}
 
 	return helpStyle.Render(hint)
+}
+
+// viewConfirmClose renders the save confirmation dialog.
+func (s SettingsView) viewConfirmClose() string {
+	bg := s.theme.Base00
+	sty := styles.NewStyles(s.theme)
+	textStyle := lipgloss.NewStyle().Foreground(s.theme.Base05)
+	keyStyle := lipgloss.NewStyle().Foreground(s.theme.Base0D).Bold(true)
+	dimStyle := lipgloss.NewStyle().Foreground(s.theme.Base04)
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		textStyle.Render("You have unsaved changes."),
+		textStyle.Render("Save before leaving?"),
+		"",
+		dimStyle.Render(keyStyle.Render("[y]")+" save    "+keyStyle.Render("[n]")+" discard    "+keyStyle.Render("[esc]")+" cancel"),
+	)
+
+	modal := sty.ModalBorder.Width(44).Render(content)
+	return lipgloss.Place(s.width, s.height, lipgloss.Center, lipgloss.Center, modal,
+		lipgloss.WithWhitespaceBackground(bg))
 }
 
