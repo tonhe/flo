@@ -3,6 +3,7 @@ package views
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -22,14 +23,21 @@ type DetailView struct {
 	ifaceStats  *engine.InterfaceStats
 	width       int
 	height      int
+	timeFormat  string
 }
 
 // NewDetailView creates a new DetailView with the given theme.
 func NewDetailView(theme styles.Theme) DetailView {
 	return DetailView{
-		theme: theme,
-		sty:   styles.NewStyles(theme),
+		theme:      theme,
+		sty:        styles.NewStyles(theme),
+		timeFormat: "relative",
 	}
+}
+
+// SetTimeFormat updates the time format used for chart time axis labels.
+func (v *DetailView) SetTimeFormat(format string) {
+	v.timeFormat = format
 }
 
 // SetInterface updates the detail view with new interface data.
@@ -95,7 +103,7 @@ func (v DetailView) renderDetail() string {
 	}
 
 	// Extract rate data from history
-	inData, outData := v.extractRateData()
+	inData, outData, timestamps := v.extractRateData()
 
 	// Render charts with proper per-element coloring
 	inColors := components.ChartColors{
@@ -110,8 +118,18 @@ func (v DetailView) renderDetail() string {
 		TitleFg: v.theme.Base0D, // blue for title
 		Bg:      v.theme.Base00, // theme background
 	}
-	inChart := components.RenderChart(inData, chartWidth, chartHeight, "In Traffic", inColors)
-	outChart := components.RenderChart(outData, chartWidth, chartHeight, "Out Traffic", outColors)
+	inOpts := components.ChartOptions{
+		Timestamps: timestamps,
+		TimeFormat: v.timeFormat,
+		Label:      "In",
+	}
+	outOpts := components.ChartOptions{
+		Timestamps: timestamps,
+		TimeFormat: v.timeFormat,
+		Label:      "Out",
+	}
+	inChart := components.RenderChartWithOptions(inData, chartWidth, chartHeight, inColors, inOpts)
+	outChart := components.RenderChartWithOptions(outData, chartWidth, chartHeight, outColors, outOpts)
 
 	// Join charts side by side with a separator
 	sepStyle := lipgloss.NewStyle().Foreground(v.theme.Base03).Background(v.theme.Base00)
@@ -189,24 +207,26 @@ func (v DetailView) renderHelp() string {
 	return helpStyle.Render(fmt.Sprintf("  %s to go back", keyStyle.Render("[esc]")))
 }
 
-// extractRateData pulls InRate and OutRate slices from the interface history.
-func (v DetailView) extractRateData() (inData, outData []float64) {
+// extractRateData pulls InRate, OutRate, and Timestamp slices from the interface history.
+func (v DetailView) extractRateData() (inData, outData []float64, timestamps []time.Time) {
 	if v.ifaceStats == nil || v.ifaceStats.History == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	samples := v.ifaceStats.History.All()
 	if len(samples) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	inData = make([]float64, len(samples))
 	outData = make([]float64, len(samples))
+	timestamps = make([]time.Time, len(samples))
 	for i, s := range samples {
 		inData[i] = s.InRate
 		outData[i] = s.OutRate
+		timestamps[i] = s.Timestamp
 	}
-	return inData, outData
+	return inData, outData, timestamps
 }
 
 // formatSpeed converts an interface speed in Mbps to a human-readable string.
