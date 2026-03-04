@@ -13,6 +13,7 @@ type Config struct {
 	PollInterval    time.Duration `toml:"-"`
 	PollIntervalStr string        `toml:"poll_interval"`
 	MaxHistory      int           `toml:"max_history"`
+	TimeFormat      string        `toml:"time_format"`
 }
 
 func DefaultConfig() *Config {
@@ -22,6 +23,7 @@ func DefaultConfig() *Config {
 		PollInterval:    10 * time.Second,
 		PollIntervalStr: "10s",
 		MaxHistory:      360,
+		TimeFormat:      "relative",
 	}
 }
 
