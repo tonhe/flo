@@ -375,6 +375,7 @@ func (p *Poller) snapshotLocked() *DashboardSnapshot {
 		Name:      p.dash.Name,
 		LastPoll:  p.lastPoll,
 		PollCount: p.pollCount,
+		Interval:  p.dash.Interval,
 	}
 
 	for _, group := range p.dash.Groups {

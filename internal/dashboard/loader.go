@@ -24,7 +24,7 @@ func LoadDashboard(path string) (*Dashboard, error) {
 		}
 	}
 	if dash.Interval == 0 {
-		dash.Interval = 10 * time.Second
+		dash.Interval = 5 * time.Second
 	}
 	if dash.MaxHistory == 0 {
 		dash.MaxHistory = 360

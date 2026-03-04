@@ -116,6 +116,16 @@ func (m *Manager) ListEngines() []EngineInfo {
 	return infos
 }
 
+// GetDashboard returns the dashboard config for the named engine, or nil.
+func (m *Manager) GetDashboard(name string) *dashboard.Dashboard {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if p, ok := m.engines[name]; ok {
+		return p.dash
+	}
+	return nil
+}
+
 // StopAll halts and removes all running engines.
 func (m *Manager) StopAll() {
 	m.mu.Lock()

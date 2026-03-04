@@ -122,10 +122,10 @@ func NewBuilderView(theme styles.Theme, provider identity.Provider) BuilderView 
 	b.identityInput.Width = 40
 
 	b.intervalInput = textinput.New()
-	b.intervalInput.Placeholder = "10s"
+	b.intervalInput.Placeholder = "5s"
 	b.intervalInput.CharLimit = 16
 	b.intervalInput.Width = 40
-	b.intervalInput.SetValue("10s")
+	b.intervalInput.SetValue("5s")
 
 	b.step1Focus = 0
 
@@ -944,7 +944,7 @@ func (b BuilderView) saveDashboard() (BuilderView, tea.Cmd, BuilderAction) {
 
 	intervalStr := strings.TrimSpace(b.intervalInput.Value())
 	if intervalStr == "" {
-		intervalStr = "10s"
+		intervalStr = "5s"
 	}
 	interval, err := time.ParseDuration(intervalStr)
 	if err != nil {
@@ -1042,7 +1042,7 @@ func (b BuilderView) viewStepReview() string {
 	}
 	interval := strings.TrimSpace(b.intervalInput.Value())
 	if interval == "" {
-		interval = "10s"
+		interval = "5s"
 	}
 
 	s.WriteString(fmt.Sprintf("    %s %s\n", labelStyle.Render(padRight("Name:", 18)), valStyle.Render(name)))

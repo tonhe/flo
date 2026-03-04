@@ -3,16 +3,12 @@ package config
 import (
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.Theme != "solarized-dark" {
 		t.Errorf("expected default theme 'solarized-dark', got %q", cfg.Theme)
-	}
-	if cfg.PollInterval != 10*time.Second {
-		t.Errorf("expected poll interval 10s, got %v", cfg.PollInterval)
 	}
 	if cfg.MaxHistory != 360 {
 		t.Errorf("expected max history 360, got %d", cfg.MaxHistory)

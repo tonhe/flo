@@ -3,6 +3,7 @@ package components
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -70,34 +71,15 @@ func RenderChart(data []float64, width, height int, title string, colors ChartCo
 		data = data[len(data)-chartWidth:]
 	}
 
-	// Find min and max for scaling
-	minVal, maxVal := data[0], data[0]
-	for _, v := range data {
-		if v < minVal {
-			minVal = v
-		}
-		if v > maxVal {
-			maxVal = v
-		}
-	}
-
-	// Ensure we have some range to work with
-	if maxVal == minVal {
-		maxVal = minVal + 1
-	}
-	// Always start Y-axis at 0 if all values are positive
-	if minVal > 0 {
-		minVal = 0
-	}
-
-	spread := maxVal - minVal
+	// Build a scale that uses split zones when spikes are extreme
+	scale := newChartScale(data, chartHeight)
 
 	// Build the chart grid from top to bottom.
 	// Each row represents a range of values. We use block characters to show
 	// how much of each cell is "filled" by the data value.
 	for row := chartHeight - 1; row >= 0; row-- {
-		// Y-axis label: show the value at this row's midpoint
-		rowTopVal := minVal + spread*float64(row+1)/float64(chartHeight)
+		// Y-axis label: show the value at this row's top boundary
+		rowTopVal := scale.valueAtRow(float64(row + 1))
 		label := fmt.Sprintf("%7s ", FormatRate(rowTopVal))
 		if len(label) > labelWidth {
 			label = label[len(label)-labelWidth:]
@@ -112,20 +94,16 @@ func RenderChart(data []float64, width, height int, title string, colors ChartCo
 			emptyChars.WriteRune(' ')
 		}
 
-		for _, v := range data {
-			// Calculate how much of this cell the value fills.
-			cellBottom := minVal + spread*float64(row)/float64(chartHeight)
-			cellTop := minVal + spread*float64(row+1)/float64(chartHeight)
-			cellRange := cellTop - cellBottom
+		cellBottom := scale.valueAtRow(float64(row))
+		cellTop := rowTopVal
+		cellRange := cellTop - cellBottom
 
-			if v <= cellBottom {
-				// Value is below this cell
+		for _, v := range data {
+			if cellRange == 0 || v <= cellBottom {
 				barChars.WriteRune(' ')
 			} else if v >= cellTop {
-				// Value fills this entire cell
 				barChars.WriteRune(chartBlocks[8])
 			} else {
-				// Value partially fills this cell
 				fraction := (v - cellBottom) / cellRange
 				idx := int(math.Round(fraction * 8))
 				if idx < 0 {
@@ -178,11 +156,14 @@ func FormatTimeLabel(ts, now time.Time, format string) string {
 	}
 }
 
-// formatRelative returns a relative time label like "now", "5m ago", "1h ago".
+// formatRelative returns a relative time label like "now", "30s ago", "5m ago", "1h ago".
 func formatRelative(ts, now time.Time) string {
 	diff := now.Sub(ts)
-	if diff < 30*time.Second {
+	if diff < 10*time.Second {
 		return "now"
+	}
+	if diff < time.Minute {
+		return fmt.Sprintf("%ds ago", int(diff.Seconds()))
 	}
 	if diff < time.Hour {
 		return fmt.Sprintf("%dm ago", int(diff.Minutes()))
@@ -252,28 +233,14 @@ func RenderChartWithOptions(data []float64, width, height int, colors ChartColor
 		trimmedData = trimmedData[len(trimmedData)-chartWidth:]
 	}
 
-	// Find min and max for scaling
-	minVal, maxVal := trimmedData[0], trimmedData[0]
-	for _, v := range trimmedData {
-		if v < minVal {
-			minVal = v
-		}
-		if v > maxVal {
-			maxVal = v
-		}
-	}
-	if maxVal == minVal {
-		maxVal = minVal + 1
-	}
-	if minVal > 0 {
-		minVal = 0
-	}
-
-	spread := maxVal - minVal
+	// Build a scale that uses split zones when spikes are extreme.
+	// Bottom ~80% of rows get full resolution for normal traffic,
+	// top ~20% get compressed scale to show spikes without crushing the chart.
+	scale := newChartScale(trimmedData, chartHeight)
 
 	// Build the chart grid from top to bottom
 	for row := chartHeight - 1; row >= 0; row-- {
-		rowTopVal := minVal + spread*float64(row+1)/float64(chartHeight)
+		rowTopVal := scale.valueAtRow(float64(row + 1))
 		label := fmt.Sprintf("%7s ", FormatRate(rowTopVal))
 		if len(label) > labelWidth {
 			label = label[len(label)-labelWidth:]
@@ -287,12 +254,12 @@ func RenderChartWithOptions(data []float64, width, height int, colors ChartColor
 			emptyChars.WriteRune(' ')
 		}
 
-		for _, v := range trimmedData {
-			cellBottom := minVal + spread*float64(row)/float64(chartHeight)
-			cellTop := minVal + spread*float64(row+1)/float64(chartHeight)
-			cellRange := cellTop - cellBottom
+		cellBottom := scale.valueAtRow(float64(row))
+		cellTop := rowTopVal
+		cellRange := cellTop - cellBottom
 
-			if v <= cellBottom {
+		for _, v := range trimmedData {
+			if cellRange == 0 || v <= cellBottom {
 				barChars.WriteRune(' ')
 			} else if v >= cellTop {
 				barChars.WriteRune(chartBlocks[8])
@@ -370,51 +337,94 @@ func renderStatsTitle(data []float64, width int, colors ChartColors, opts ChartO
 	return titleParts
 }
 
-// renderTimeAxis builds the time axis row with evenly-spaced time labels.
+// timeAxisIntervals are the candidate intervals for time axis labels,
+// ordered from smallest to largest. The algorithm picks the smallest
+// interval that avoids label overlap.
+var timeAxisIntervals = []time.Duration{
+	5 * time.Second,
+	10 * time.Second,
+	15 * time.Second,
+	30 * time.Second,
+	1 * time.Minute,
+	2 * time.Minute,
+	5 * time.Minute,
+	10 * time.Minute,
+	15 * time.Minute,
+	30 * time.Minute,
+	1 * time.Hour,
+}
+
+// renderTimeAxis builds the time axis row with time-anchored labels.
+// "now" is always pinned to the right edge. Round-time markers (e.g. 30s,
+// 1m, 2m) appear at their natural positions and scroll left as data grows.
 func renderTimeAxis(timestamps []time.Time, chartWidth, labelWidth, totalWidth int, format string, labelStyle lipgloss.Style) string {
-	now := time.Now()
-
-	// Determine number of labels based on chart width
-	numLabels := 4
-	if chartWidth < 30 {
-		numLabels = 2
-	} else if chartWidth < 50 {
-		numLabels = 3
-	}
-
-	if len(timestamps) < numLabels {
-		numLabels = len(timestamps)
-	}
-	if numLabels == 0 {
+	if len(timestamps) == 0 {
 		return labelStyle.Render(strings.Repeat(" ", totalWidth))
 	}
 
-	// Build the axis line as a character buffer (for the chart area)
+	now := time.Now()
+
+	// Build the axis line as a character buffer
 	axis := make([]byte, chartWidth)
 	for i := range axis {
 		axis[i] = ' '
 	}
 
-	// Calculate padding offset (data may not fill full chart width)
+	// Data offset: empty columns before data starts
 	dataOffset := chartWidth - len(timestamps)
 	if dataOffset < 0 {
 		dataOffset = 0
 	}
 
-	// Place labels at evenly-spaced positions within the data range.
-	// Track the end of the last placed label to prevent overlap.
-	lastEnd := -1
-	for i := 0; i < numLabels; i++ {
-		var dataIdx int
-		if numLabels == 1 {
-			dataIdx = len(timestamps) - 1
-		} else {
-			dataIdx = i * (len(timestamps) - 1) / (numLabels - 1)
+	// Always place "now" at the rightmost data position
+	nowLabel := FormatTimeLabel(timestamps[len(timestamps)-1], now, format)
+	nowPos := chartWidth - len(nowLabel)
+	if nowPos < 0 {
+		nowPos = 0
+	}
+	for j := 0; j < len(nowLabel) && nowPos+j < chartWidth; j++ {
+		axis[nowPos+j] = nowLabel[j]
+	}
+	// Track occupied regions to prevent overlap (need 2-char gap between labels)
+	type region struct{ start, end int }
+	occupied := []region{{nowPos, chartWidth - 1}}
+
+	// Determine the time span of the data
+	oldest := timestamps[0]
+	span := now.Sub(oldest)
+	if span < time.Second {
+		prefix := strings.Repeat(" ", labelWidth)
+		return labelStyle.Render(prefix + string(axis))
+	}
+
+	// Pick the smallest interval that yields a reasonable label count.
+	// We want labels spaced at least ~10 chars apart.
+	interval := timeAxisIntervals[len(timeAxisIntervals)-1]
+	for _, candidate := range timeAxisIntervals {
+		if candidate > span {
+			continue
 		}
+		// Estimate how many labels this interval would produce
+		count := int(span / candidate)
+		if count <= 0 {
+			continue
+		}
+		// Estimate average spacing in chars
+		spacing := chartWidth / count
+		if spacing >= 10 {
+			interval = candidate
+			break
+		}
+	}
 
-		label := FormatTimeLabel(timestamps[dataIdx], now, format)
+	// Place labels at each interval mark, working from right (newest) to left.
+	// Start from the first full interval before "now".
+	for elapsed := interval; elapsed <= span; elapsed += interval {
+		label := formatElapsed(elapsed)
 
-		// Position in the axis buffer
+		// Find the data index closest to this elapsed time
+		targetTime := now.Add(-elapsed)
+		dataIdx := findClosestTimestamp(timestamps, targetTime)
 		pos := dataOffset + dataIdx
 
 		// Center the label on this position
@@ -426,11 +436,19 @@ func renderTimeAxis(timestamps []time.Time, chartWidth, labelWidth, totalWidth i
 			startPos = chartWidth - len(label)
 		}
 		if startPos < 0 {
-			continue // label doesn't fit
+			continue
 		}
+		endPos := startPos + len(label) - 1
 
-		// Skip if this label would overlap the previous one (need 2-char gap)
-		if startPos <= lastEnd+2 {
+		// Check overlap with all occupied regions (need 2-char gap)
+		overlaps := false
+		for _, r := range occupied {
+			if startPos <= r.end+2 && endPos >= r.start-2 {
+				overlaps = true
+				break
+			}
+		}
+		if overlaps {
 			continue
 		}
 
@@ -438,10 +456,158 @@ func renderTimeAxis(timestamps []time.Time, chartWidth, labelWidth, totalWidth i
 		for j := 0; j < len(label) && startPos+j < chartWidth; j++ {
 			axis[startPos+j] = label[j]
 		}
-		lastEnd = startPos + len(label) - 1
+		occupied = append(occupied, region{startPos, endPos})
 	}
 
-	// Build the full line: label-width padding + axis
 	prefix := strings.Repeat(" ", labelWidth)
 	return labelStyle.Render(prefix + string(axis))
+}
+
+// formatElapsed formats a duration as a compact label: "10s", "1.5m", "5m", "1h".
+// Fractional minutes are shown with up to one decimal place (e.g. 90s → "1.5m"),
+// but trailing ".0" is omitted for whole minutes (e.g. 60s → "1m").
+func formatElapsed(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		totalSecs := int(d.Seconds())
+		if totalSecs%60 == 0 {
+			return fmt.Sprintf("%dm", totalSecs/60)
+		}
+		// Fractional minutes: trim trailing zeros after decimal
+		s := fmt.Sprintf("%.1f", float64(totalSecs)/60.0)
+		s = strings.TrimRight(s, "0")
+		s = strings.TrimRight(s, ".")
+		return s + "m"
+	}
+	return fmt.Sprintf("%dh", int(d.Hours()))
+}
+
+// findClosestTimestamp returns the index of the timestamp closest to target.
+func findClosestTimestamp(timestamps []time.Time, target time.Time) int {
+	best := 0
+	bestDiff := absDuration(timestamps[0].Sub(target))
+	for i := 1; i < len(timestamps); i++ {
+		diff := absDuration(timestamps[i].Sub(target))
+		if diff < bestDiff {
+			bestDiff = diff
+			best = i
+		}
+	}
+	return best
+}
+
+// absDuration returns the absolute value of a duration.
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
+}
+
+// chartScale handles Y-axis scaling with an optional compressed spike zone.
+// When data has extreme spikes (actualMax > 3x p95), the chart splits into:
+//   - Normal zone (bottom ~80% of rows): linear scale from 0 to breakpoint
+//   - Spike zone (top ~20% of rows): compressed linear scale from breakpoint to max
+//
+// This keeps normal traffic readable while still showing spikes.
+type chartScale struct {
+	max        float64 // actual data maximum
+	breakpoint float64 // split point between zones (0 = no split, pure linear)
+	normalRows int     // rows allocated to the normal zone
+	totalRows  int     // total chart rows
+}
+
+// newChartScale analyzes data and returns a scale, splitting into two zones
+// when extreme spikes are detected.
+func newChartScale(data []float64, totalRows int) chartScale {
+	s := chartScale{totalRows: totalRows, normalRows: totalRows}
+
+	if len(data) == 0 {
+		s.max = 1
+		return s
+	}
+
+	// Find actual max
+	actualMax := data[0]
+	for _, v := range data[1:] {
+		if v > actualMax {
+			actualMax = v
+		}
+	}
+	if actualMax == 0 {
+		actualMax = 1
+	}
+	s.max = actualMax
+
+	// Need enough data points for meaningful percentile
+	if len(data) <= 3 {
+		return s
+	}
+
+	sorted := make([]float64, len(data))
+	copy(sorted, data)
+	sort.Float64s(sorted)
+
+	median := sorted[len(sorted)/2]
+
+	// Split when the max is dramatically higher than typical traffic.
+	if median == 0 || actualMax <= median*5 {
+		return s
+	}
+
+	// Find the breakpoint by locating the largest RELATIVE gap in the sorted
+	// data. Using ratio (sorted[i]/sorted[i-1]) instead of absolute difference
+	// ensures we find the transition from normal traffic to spikes, not gaps
+	// between spike sub-clusters. E.g., 3M→94M (31x) beats 94M→237M (2.5x).
+	maxRelGap := 0.0
+	gapIdx := 0
+	for i := 1; i < len(sorted); i++ {
+		if sorted[i-1] <= 0 {
+			continue
+		}
+		relGap := sorted[i] / sorted[i-1]
+		if relGap > maxRelGap {
+			maxRelGap = relGap
+			gapIdx = i
+		}
+	}
+
+	// Place breakpoint just above the normal cluster, with headroom
+	if gapIdx > 0 {
+		s.breakpoint = sorted[gapIdx-1] * 1.3
+	}
+	if s.breakpoint < 1 {
+		s.breakpoint = sorted[gapIdx] * 0.1
+	}
+	s.normalRows = int(float64(totalRows) * 0.8)
+	if s.normalRows < 2 {
+		s.normalRows = 2
+	}
+	if s.normalRows >= totalRows {
+		s.normalRows = totalRows - 1
+	}
+
+	return s
+}
+
+// valueAtRow returns the data value at a given row boundary.
+// Row 0 bottom = 0, row totalRows top = max.
+// Uses piecewise linear mapping when split-scale is active.
+func (s chartScale) valueAtRow(row float64) float64 {
+	if s.breakpoint == 0 {
+		// Pure linear
+		return s.max * row / float64(s.totalRows)
+	}
+
+	nr := float64(s.normalRows)
+	if row <= nr {
+		// Normal zone: 0 to breakpoint
+		return s.breakpoint * row / nr
+	}
+
+	// Spike zone: breakpoint to max
+	spikeRows := float64(s.totalRows - s.normalRows)
+	return s.breakpoint + (s.max-s.breakpoint)*(row-nr)/spikeRows
 }

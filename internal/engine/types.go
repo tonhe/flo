@@ -32,6 +32,7 @@ type DashboardSnapshot struct {
 	Groups    []GroupSnapshot
 	LastPoll  time.Time
 	PollCount int
+	Interval  time.Duration
 }
 
 // GroupSnapshot is a point-in-time view of a target group.

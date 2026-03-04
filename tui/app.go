@@ -56,7 +56,8 @@ type AppModel struct {
 	activeDash    string
 	startDashName string // auto-start dashboard from --dashboard flag
 	storePath     string
-	confirmQuit   bool
+	confirmQuit        bool
+	identityFromSettings bool
 }
 
 // NewAppModel creates a new AppModel with the given config, engine manager,
@@ -251,7 +252,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			if goBack {
-				m.state = StateDashboard
+				if m.identityFromSettings {
+					m.identityFromSettings = false
+					m.settings = views.NewSettingsView(m.theme, m.config, m.provider)
+					m.settings.SetSize(m.width, m.height-3)
+					m.state = StateSettings
+				} else {
+					m.state = StateDashboard
+				}
 				return m, nil
 			}
 			return m, cmd
@@ -312,17 +320,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case views.BuilderActionSave:
-				path := m.builder.SavedPath
-				if dash, err := dashboard.LoadDashboard(path); err == nil {
-					// Stop old engine if editing an active dashboard
-					if m.activeDash != "" {
-						_ = m.manager.Stop(m.activeDash)
-					}
-					if m.provider != nil {
-						_ = m.manager.Start(dash, m.provider)
-					}
-					m.activeDash = dash.Name
-				}
+				m.applyDashboardSave(m.builder.SavedPath)
 				m.state = StateDashboard
 				return m, nil
 			}
@@ -356,6 +354,18 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.state = StateDashboard
 				return m, nil
+
+			case views.SettingsManageIdentities:
+				m.identity = views.NewIdentityView(m.theme, m.provider)
+				m.identity.SetSize(m.width, m.height-3)
+				m.identity.SetStorePath(m.storePath)
+				m.identity.SetOnStoreCreated(func(p identity.Provider) {
+					m.provider = p
+				})
+				m.identity.Refresh()
+				m.identityFromSettings = true
+				m.state = StateIdentity
+				return m, nil
 			}
 			return m, cmd
 
@@ -365,16 +375,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.editor, cmd, action = m.editor.Update(msg)
 			switch action {
 			case views.EditorActionSaved:
-				path := m.editor.SavedPath
-				if dash, loadErr := dashboard.LoadDashboard(path); loadErr == nil {
-					if m.activeDash != "" {
-						_ = m.manager.Stop(m.activeDash)
-					}
-					if m.provider != nil {
-						_ = m.manager.Start(dash, m.provider)
-					}
-					m.activeDash = dash.Name
-				}
+				m.applyDashboardSave(m.editor.SavedPath)
 				m.state = StateDashboard
 				return m, nil
 			case views.EditorActionClose:
@@ -393,16 +394,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var action views.BuilderAction
 			m.builder, cmd, action = m.builder.Update(msg)
 			if action == views.BuilderActionSave {
-				path := m.builder.SavedPath
-				if dash, err := dashboard.LoadDashboard(path); err == nil {
-					if m.activeDash != "" {
-						_ = m.manager.Stop(m.activeDash)
-					}
-					if m.provider != nil {
-						_ = m.manager.Start(dash, m.provider)
-					}
-					m.activeDash = dash.Name
-				}
+				m.applyDashboardSave(m.builder.SavedPath)
 				m.state = StateDashboard
 			} else if action == views.BuilderActionClose {
 				m.state = StateDashboard
@@ -414,16 +406,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var action views.EditorAction
 			m.editor, cmd, action = m.editor.Update(msg)
 			if action == views.EditorActionSaved {
-				path := m.editor.SavedPath
-				if dash, loadErr := dashboard.LoadDashboard(path); loadErr == nil {
-					if m.activeDash != "" {
-						_ = m.manager.Stop(m.activeDash)
-					}
-					if m.provider != nil {
-						_ = m.manager.Start(dash, m.provider)
-					}
-					m.activeDash = dash.Name
-				}
+				m.applyDashboardSave(m.editor.SavedPath)
 				m.state = StateDashboard
 			} else if action == views.EditorActionClose {
 				m.state = StateDashboard
@@ -465,6 +448,31 @@ func (m *AppModel) switchToDashboard(item *views.SwitcherItem) {
 		}
 	}
 	m.activeDash = dash.Name
+}
+
+// applyDashboardSave loads a saved dashboard and restarts its engine only if
+// polling-relevant fields changed. Cosmetic edits (labels) preserve graph data.
+func (m *AppModel) applyDashboardSave(path string) {
+	newDash, err := dashboard.LoadDashboard(path)
+	if err != nil {
+		return
+	}
+
+	// Check if the running engine needs a restart
+	if m.activeDash != "" {
+		oldDash := m.manager.GetDashboard(m.activeDash)
+		if oldDash != nil && !dashboard.NeedsRestart(oldDash, newDash) {
+			// No restart needed — keep engine running with existing data
+			m.activeDash = newDash.Name
+			return
+		}
+		_ = m.manager.Stop(m.activeDash)
+	}
+
+	if m.provider != nil {
+		_ = m.manager.Start(newDash, m.provider)
+	}
+	m.activeDash = newDash.Name
 }
 
 // editDashboard loads a dashboard TOML and opens it in the editor for editing.
@@ -585,6 +593,7 @@ func (m AppModel) View() string {
 	if m.activeDash != "" {
 		if snap := m.manager.TryGetSnapshot(m.activeDash); snap != nil {
 			lastPoll = snap.LastPoll
+			interval = snap.Interval
 			for _, g := range snap.Groups {
 				for _, t := range g.Targets {
 					for _, iface := range t.Interfaces {
@@ -596,7 +605,6 @@ func (m AppModel) View() string {
 				}
 			}
 		}
-		interval = m.config.PollInterval
 	}
 
 	// Per-state key hints for the status bar

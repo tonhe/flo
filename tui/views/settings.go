@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -28,15 +27,17 @@ const (
 	SettingsClose
 	// SettingsSaved means the config was saved; the app should apply changes.
 	SettingsSaved
+	// SettingsManageIdentities means the user wants to open the identity manager.
+	SettingsManageIdentities
 )
 
 // Settings field indices.
 const (
 	settingsFieldTheme      = 0
 	settingsFieldIdentity   = 1
-	settingsFieldInterval   = 2
-	settingsFieldHistory    = 3
-	settingsFieldTimeFormat = 4
+	settingsFieldHistory    = 2
+	settingsFieldTimeFormat = 3
+	settingsFieldManageIds  = 4
 	settingsFieldCount      = 5
 )
 
@@ -57,7 +58,6 @@ type SettingsView struct {
 
 	// Editable text fields
 	identityInput textinput.Model
-	intervalInput textinput.Model
 	historyInput  textinput.Model
 
 	// Identity picker
@@ -91,12 +91,6 @@ func NewSettingsView(theme styles.Theme, cfg *config.Config, provider identity.P
 	identityInput.Width = 40
 	identityInput.SetValue(cfg.DefaultIdentity)
 
-	intervalInput := textinput.New()
-	intervalInput.Placeholder = "10s"
-	intervalInput.CharLimit = 16
-	intervalInput.Width = 40
-	intervalInput.SetValue(cfg.PollInterval.String())
-
 	historyInput := textinput.New()
 	historyInput.Placeholder = "360"
 	historyInput.CharLimit = 8
@@ -118,9 +112,8 @@ func NewSettingsView(theme styles.Theme, cfg *config.Config, provider identity.P
 		themeIndex:      themeIdx,
 		timeFormatIndex: timeFormatIdx,
 		cursor:          0,
-		identityInput:   identityInput,
-		intervalInput:   intervalInput,
-		historyInput:    historyInput,
+		identityInput: identityInput,
+		historyInput:  historyInput,
 		provider:        provider,
 	}
 }
@@ -173,16 +166,14 @@ func (s SettingsView) PreviewTheme() styles.Theme {
 // focusInput blurs all inputs and focuses the one at the cursor position.
 func (s *SettingsView) focusInput() {
 	s.identityInput.Blur()
-	s.intervalInput.Blur()
 	s.historyInput.Blur()
 
 	switch s.cursor {
 	case settingsFieldIdentity:
 		s.identityInput.Focus()
-	case settingsFieldInterval:
-		s.intervalInput.Focus()
 	case settingsFieldHistory:
 		s.historyInput.Focus()
+	// settingsFieldManageIds and settingsFieldTheme have no text input
 	}
 }
 
@@ -192,9 +183,6 @@ func (s SettingsView) hasChanges() bool {
 		return true
 	}
 	if strings.TrimSpace(s.identityInput.Value()) != s.config.DefaultIdentity {
-		return true
-	}
-	if strings.TrimSpace(s.intervalInput.Value()) != s.config.PollInterval.String() {
 		return true
 	}
 	if strings.TrimSpace(s.historyInput.Value()) != strconv.Itoa(s.config.MaxHistory) {
@@ -281,6 +269,9 @@ func (s SettingsView) Update(msg tea.Msg) (SettingsView, tea.Cmd, SettingsAction
 				s.picker.SetSize(s.width, s.height)
 				s.showPicker = true
 				return s, nil, SettingsNone
+			}
+			if s.cursor == settingsFieldManageIds {
+				return s, nil, SettingsManageIdentities
 			}
 			return s.save()
 
@@ -376,8 +367,6 @@ func (s SettingsView) updateTextInput(msg tea.Msg) (SettingsView, tea.Cmd, Setti
 	switch s.cursor {
 	case settingsFieldIdentity:
 		s.identityInput, cmd = s.identityInput.Update(msg)
-	case settingsFieldInterval:
-		s.intervalInput, cmd = s.intervalInput.Update(msg)
 	case settingsFieldHistory:
 		s.historyInput, cmd = s.historyInput.Update(msg)
 	}
@@ -386,21 +375,6 @@ func (s SettingsView) updateTextInput(msg tea.Msg) (SettingsView, tea.Cmd, Setti
 
 // save validates and persists the config to disk.
 func (s SettingsView) save() (SettingsView, tea.Cmd, SettingsAction) {
-	// Validate poll interval
-	intervalStr := strings.TrimSpace(s.intervalInput.Value())
-	if intervalStr == "" {
-		intervalStr = "10s"
-	}
-	interval, err := time.ParseDuration(intervalStr)
-	if err != nil {
-		s.err = fmt.Sprintf("Invalid poll interval: %v", err)
-		return s, nil, SettingsNone
-	}
-	if interval < time.Second {
-		s.err = "Poll interval must be at least 1s"
-		return s, nil, SettingsNone
-	}
-
 	// Validate max history
 	historyStr := strings.TrimSpace(s.historyInput.Value())
 	if historyStr == "" {
@@ -415,7 +389,6 @@ func (s SettingsView) save() (SettingsView, tea.Cmd, SettingsAction) {
 	// Apply values to config
 	s.config.Theme = s.selectedThemeSlug()
 	s.config.DefaultIdentity = strings.TrimSpace(s.identityInput.Value())
-	s.config.PollInterval = interval
 	s.config.MaxHistory = maxHistory
 	s.config.TimeFormat = s.selectedTimeFormat()
 
@@ -491,12 +464,24 @@ func (s SettingsView) View() string {
 
 	timeFormatDisplay := fmt.Sprintf("< %s >  (%d/%d)", s.selectedTimeFormat(), s.timeFormatIndex+1, len(timeFormats))
 
+	// Count identities for the manage row label
+	idCount := 0
+	if s.provider != nil {
+		if sums, err := s.provider.List(); err == nil {
+			idCount = len(sums)
+		}
+	}
+	manageLabel := "Manage Identities..."
+	if idCount > 0 {
+		manageLabel = fmt.Sprintf("Manage Identities (%d)...", idCount)
+	}
+
 	rows := []settingsRow{
 		{"Theme", themeDisplay, false, ""},
 		{"Default Identity", "", true, s.identityInput.View()},
-		{"Poll Interval", "", true, s.intervalInput.View()},
 		{"Max History", "", true, s.historyInput.View()},
 		{"Time Format", timeFormatDisplay, false, ""},
+		{"Identities", manageLabel, false, ""},
 	}
 
 	for i, row := range rows {
@@ -530,7 +515,8 @@ func (s SettingsView) renderHelp() string {
 	keyStyle := lipgloss.NewStyle().Foreground(s.theme.Base0D).Bold(true)
 
 	hint := ""
-	if s.cursor == settingsFieldTheme || s.cursor == settingsFieldTimeFormat {
+	switch s.cursor {
+	case settingsFieldTheme, settingsFieldTimeFormat:
 		hint = fmt.Sprintf(
 			"%s/%s cycle  %s browse  %s/%s navigate  %s cancel",
 			keyStyle.Render("[left]"),
@@ -540,7 +526,15 @@ func (s SettingsView) renderHelp() string {
 			keyStyle.Render("[down]"),
 			keyStyle.Render("[esc]"),
 		)
-	} else {
+	case settingsFieldManageIds:
+		hint = fmt.Sprintf(
+			"%s/%s navigate  %s open  %s cancel",
+			keyStyle.Render("[up]"),
+			keyStyle.Render("[down]"),
+			keyStyle.Render("[enter]"),
+			keyStyle.Render("[esc]"),
+		)
+	default:
 		hint = fmt.Sprintf(
 			"%s/%s navigate  %s save  %s cancel",
 			keyStyle.Render("[up]"),

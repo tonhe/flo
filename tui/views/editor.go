@@ -577,7 +577,7 @@ func (e *EditorView) save() error {
 	}
 	intervalStr := e.intervalStr
 	if intervalStr == "" {
-		intervalStr = "10s"
+		intervalStr = "5s"
 	}
 	interval, parseErr := time.ParseDuration(intervalStr)
 	if parseErr != nil {
