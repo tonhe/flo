@@ -67,15 +67,19 @@ func NewAppModel(cfg *config.Config, mgr *engine.Manager, provider identity.Prov
 	if t := styles.GetThemeByName(cfg.Theme); t != nil {
 		theme = *t
 	}
+	dashView := views.NewDashboardView(theme)
+	dashView.SetTimeFormat(cfg.TimeFormat)
+	detailView := views.NewDetailView(theme)
+	detailView.SetTimeFormat(cfg.TimeFormat)
 	return AppModel{
 		state:         StateDashboard,
 		theme:         theme,
 		config:        cfg,
 		manager:       mgr,
 		provider:      provider,
-		dashboard:     views.NewDashboardView(theme),
+		dashboard:     dashView,
 		switcher:      views.NewSwitcherView(theme),
-		detail:        views.NewDetailView(theme),
+		detail:        detailView,
 		identity:      views.NewIdentityView(theme, provider),
 		startDashName: startDash,
 		storePath:     storePath,
@@ -341,10 +345,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					bodyHeight := m.height - 3
 					m.dashboard = views.NewDashboardView(m.theme)
 					m.dashboard.SetSize(m.width, bodyHeight)
+					m.dashboard.SetTimeFormat(m.config.TimeFormat)
 					m.switcher = views.NewSwitcherView(m.theme)
 					m.switcher.SetSize(m.width, bodyHeight)
 					m.detail = views.NewDetailView(m.theme)
 					m.detail.SetSize(m.width, bodyHeight)
+					m.detail.SetTimeFormat(m.config.TimeFormat)
 					m.identity = views.NewIdentityView(m.theme, m.provider)
 					m.identity.SetSize(m.width, bodyHeight)
 				}
