@@ -32,12 +32,15 @@ const (
 
 // Settings field indices.
 const (
-	settingsFieldTheme    = 0
-	settingsFieldIdentity = 1
-	settingsFieldInterval = 2
-	settingsFieldHistory  = 3
-	settingsFieldCount    = 4
+	settingsFieldTheme      = 0
+	settingsFieldIdentity   = 1
+	settingsFieldInterval   = 2
+	settingsFieldHistory    = 3
+	settingsFieldTimeFormat = 4
+	settingsFieldCount      = 5
 )
+
+var timeFormats = []string{"relative", "absolute", "both"}
 
 // SettingsView is a full-screen settings editor with a live theme preview.
 type SettingsView struct {
@@ -45,8 +48,9 @@ type SettingsView struct {
 	sty    *styles.Styles
 	config *config.Config
 
-	themeIndex int // index into styles.ListThemes()
-	cursor     int // which setting row is focused
+	themeIndex      int // index into styles.ListThemes()
+	timeFormatIndex int // 0=relative, 1=absolute, 2=both
+	cursor          int // which setting row is focused
 
 	width  int
 	height int
@@ -99,16 +103,25 @@ func NewSettingsView(theme styles.Theme, cfg *config.Config, provider identity.P
 	historyInput.Width = 40
 	historyInput.SetValue(strconv.Itoa(cfg.MaxHistory))
 
+	timeFormatIdx := 0
+	switch cfg.TimeFormat {
+	case "absolute":
+		timeFormatIdx = 1
+	case "both":
+		timeFormatIdx = 2
+	}
+
 	return SettingsView{
-		theme:         theme,
-		sty:           sty,
-		config:        cfg,
-		themeIndex:    themeIdx,
-		cursor:        0,
-		identityInput: identityInput,
-		intervalInput: intervalInput,
-		historyInput:  historyInput,
-		provider:      provider,
+		theme:           theme,
+		sty:             sty,
+		config:          cfg,
+		themeIndex:      themeIdx,
+		timeFormatIndex: timeFormatIdx,
+		cursor:          0,
+		identityInput:   identityInput,
+		intervalInput:   intervalInput,
+		historyInput:    historyInput,
+		provider:        provider,
 	}
 }
 
@@ -137,6 +150,14 @@ func (s SettingsView) selectedTheme() styles.Theme {
 		return *t
 	}
 	return styles.DefaultTheme
+}
+
+// selectedTimeFormat returns the time format string for the currently selected index.
+func (s SettingsView) selectedTimeFormat() string {
+	if s.timeFormatIndex >= 0 && s.timeFormatIndex < len(timeFormats) {
+		return timeFormats[s.timeFormatIndex]
+	}
+	return "relative"
 }
 
 // PreviewTheme returns the theme currently being previewed. When the
@@ -177,6 +198,9 @@ func (s SettingsView) hasChanges() bool {
 		return true
 	}
 	if strings.TrimSpace(s.historyInput.Value()) != strconv.Itoa(s.config.MaxHistory) {
+		return true
+	}
+	if s.selectedTimeFormat() != s.config.TimeFormat {
 		return true
 	}
 	return false
@@ -303,6 +327,14 @@ func (s SettingsView) Update(msg tea.Msg) (SettingsView, tea.Cmd, SettingsAction
 				s.changed = true
 				return s, nil, SettingsNone
 			}
+			if s.cursor == settingsFieldTimeFormat {
+				s.timeFormatIndex--
+				if s.timeFormatIndex < 0 {
+					s.timeFormatIndex = len(timeFormats) - 1
+				}
+				s.changed = true
+				return s, nil, SettingsNone
+			}
 			// For text fields, pass through to the input
 			return s.updateTextInput(msg)
 
@@ -316,6 +348,14 @@ func (s SettingsView) Update(msg tea.Msg) (SettingsView, tea.Cmd, SettingsAction
 				// Update preview theme and styles
 				s.theme = s.selectedTheme()
 				s.sty = styles.NewStyles(s.theme)
+				s.changed = true
+				return s, nil, SettingsNone
+			}
+			if s.cursor == settingsFieldTimeFormat {
+				s.timeFormatIndex++
+				if s.timeFormatIndex >= len(timeFormats) {
+					s.timeFormatIndex = 0
+				}
 				s.changed = true
 				return s, nil, SettingsNone
 			}
@@ -377,6 +417,7 @@ func (s SettingsView) save() (SettingsView, tea.Cmd, SettingsAction) {
 	s.config.DefaultIdentity = strings.TrimSpace(s.identityInput.Value())
 	s.config.PollInterval = interval
 	s.config.MaxHistory = maxHistory
+	s.config.TimeFormat = s.selectedTimeFormat()
 
 	// Save to disk
 	cfgDir, err := config.GetConfigDir()
@@ -448,11 +489,14 @@ func (s SettingsView) View() string {
 		input   string
 	}
 
+	timeFormatDisplay := fmt.Sprintf("< %s >  (%d/%d)", s.selectedTimeFormat(), s.timeFormatIndex+1, len(timeFormats))
+
 	rows := []settingsRow{
 		{"Theme", themeDisplay, false, ""},
 		{"Default Identity", "", true, s.identityInput.View()},
 		{"Poll Interval", "", true, s.intervalInput.View()},
 		{"Max History", "", true, s.historyInput.View()},
+		{"Time Format", timeFormatDisplay, false, ""},
 	}
 
 	for i, row := range rows {
@@ -486,7 +530,7 @@ func (s SettingsView) renderHelp() string {
 	keyStyle := lipgloss.NewStyle().Foreground(s.theme.Base0D).Bold(true)
 
 	hint := ""
-	if s.cursor == settingsFieldTheme {
+	if s.cursor == settingsFieldTheme || s.cursor == settingsFieldTimeFormat {
 		hint = fmt.Sprintf(
 			"%s/%s cycle  %s browse  %s/%s navigate  %s cancel",
 			keyStyle.Render("[left]"),

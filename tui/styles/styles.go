@@ -99,7 +99,7 @@ func NewStyles(theme Theme) *Styles {
 			Background(bg),
 		TableRowSel: lipgloss.NewStyle().
 			Foreground(theme.Base05).
-			Background(theme.Base02),
+			Background(theme.Base01),
 		TableCellDim: lipgloss.NewStyle().
 			Foreground(theme.Base03).
 			Background(bg),
