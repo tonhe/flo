@@ -3,6 +3,7 @@ package views
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,25 +25,38 @@ const (
 	colSparkMin  = 12
 )
 
+// Layout constants for split view (table + graph panel).
+const (
+	minTableRows = 6 // 1 header + 5 data rows
+	minGraphRows = 8 // 1 title + 6 chart + 1 time axis
+)
+
 // DashboardView is the main monitoring table view showing all interface
 // metrics grouped by target group.
 type DashboardView struct {
-	theme     styles.Theme
-	sty       *styles.Styles
-	snapshot  *engine.DashboardSnapshot
-	cursor    int
-	width     int
-	height    int
-	totalRows int
-	offset    int // scroll offset for vertical scrolling
+	theme      styles.Theme
+	sty        *styles.Styles
+	snapshot   *engine.DashboardSnapshot
+	cursor     int
+	width      int
+	height     int
+	totalRows  int
+	offset     int // scroll offset for vertical scrolling
+	timeFormat string
 }
 
 // NewDashboardView creates a new DashboardView with the given theme.
 func NewDashboardView(theme styles.Theme) DashboardView {
 	return DashboardView{
-		theme: theme,
-		sty:   styles.NewStyles(theme),
+		theme:      theme,
+		sty:        styles.NewStyles(theme),
+		timeFormat: "relative",
 	}
+}
+
+// SetTimeFormat updates the time format used for chart time axis labels.
+func (v *DashboardView) SetTimeFormat(format string) {
+	v.timeFormat = format
 }
 
 // Update handles key messages for cursor navigation within the dashboard.
@@ -114,18 +128,63 @@ func (v DashboardView) SelectedInterface() (label string, iface *engine.Interfac
 	return "", nil
 }
 
-// View renders the dashboard view.
+// View renders the dashboard view with an optional graph panel below the table.
 func (v DashboardView) View() string {
 	if v.snapshot == nil || len(v.snapshot.Groups) == 0 {
 		return v.renderEmpty()
 	}
-	return v.renderTable()
+
+	// Calculate layout split
+	graphHeight := 0
+	separatorHeight := 0
+	tableHeight := v.height
+
+	// Only show graphs if we have enough room for both
+	if v.height >= minTableRows+minGraphRows+1 {
+		graphHeight = v.height * 40 / 100
+		if graphHeight < minGraphRows {
+			graphHeight = minGraphRows
+		}
+		separatorHeight = 1
+		tableHeight = v.height - graphHeight - separatorHeight
+		if tableHeight < minTableRows {
+			tableHeight = minTableRows
+			graphHeight = v.height - tableHeight - separatorHeight
+		}
+	}
+
+	tableContent := v.renderTableWithHeight(tableHeight)
+
+	if graphHeight == 0 {
+		return tableContent
+	}
+
+	sepStyle := lipgloss.NewStyle().
+		Foreground(v.theme.Base03).
+		Background(v.theme.Base00)
+	separator := sepStyle.Render(strings.Repeat("─", v.width))
+
+	graphPanel := v.renderGraphPanel(graphHeight)
+
+	return lipgloss.JoinVertical(lipgloss.Left, tableContent, separator, graphPanel)
 }
 
 // ensureVisible adjusts the scroll offset so the cursor row is visible.
 func (v *DashboardView) ensureVisible() {
-	// Account for the table header row in available space.
-	visible := v.height - 1
+	// Calculate effective table height, accounting for graph panel.
+	tableHeight := v.height
+	if v.height >= minTableRows+minGraphRows+1 {
+		graphHeight := v.height * 40 / 100
+		if graphHeight < minGraphRows {
+			graphHeight = minGraphRows
+		}
+		tableHeight = v.height - graphHeight - 1
+		if tableHeight < minTableRows {
+			tableHeight = minTableRows
+		}
+	}
+
+	visible := tableHeight - 1
 	if visible < 1 {
 		visible = 1
 	}
@@ -155,9 +214,9 @@ func (v DashboardView) columnWidths() (device, iface, status, inCol, outCol, uti
 	return
 }
 
-// renderTable renders the full dashboard table with group headers and
-// interface rows.
-func (v DashboardView) renderTable() string {
+// renderTableWithHeight renders the full dashboard table with group headers and
+// interface rows, constrained to the given height.
+func (v DashboardView) renderTableWithHeight(tableHeight int) string {
 	wDevice, wIface, wStatus, wIn, wOut, wUtil, wSpark := v.columnWidths()
 
 	var lines []string
@@ -209,7 +268,7 @@ func (v DashboardView) renderTable() string {
 	// all rows (group headers + interface rows combined).
 	// We need to map the interface-only cursor offset to the combined list.
 	// Recalculate offset in terms of the combined rows list.
-	visibleHeight := v.height - 1 // subtract header
+	visibleHeight := tableHeight - 1 // subtract header
 	if visibleHeight < 1 {
 		visibleHeight = 1
 	}
@@ -349,6 +408,80 @@ func (v DashboardView) renderInterfaceRow(
 	return fmt.Sprintf("%s%s%s%s%s%s%s",
 		device, ifName, statusStr, inStr, outStr, utilStr, sparkRendered,
 	)
+}
+
+// renderGraphPanel renders the In/Out traffic charts for the selected interface.
+func (v DashboardView) renderGraphPanel(panelHeight int) string {
+	_, iface := v.SelectedInterface()
+	if iface == nil || iface.History == nil {
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(v.theme.Base04).
+			Background(v.theme.Base00)
+		msg := emptyStyle.Render("No interface data")
+		return lipgloss.Place(v.width, panelHeight, lipgloss.Center, lipgloss.Center, msg,
+			lipgloss.WithWhitespaceBackground(v.theme.Base00))
+	}
+
+	samples := iface.History.All()
+	if len(samples) == 0 {
+		emptyStyle := lipgloss.NewStyle().
+			Foreground(v.theme.Base04).
+			Background(v.theme.Base00)
+		msg := emptyStyle.Render("Waiting for data...")
+		return lipgloss.Place(v.width, panelHeight, lipgloss.Center, lipgloss.Center, msg,
+			lipgloss.WithWhitespaceBackground(v.theme.Base00))
+	}
+
+	inData := make([]float64, len(samples))
+	outData := make([]float64, len(samples))
+	timestamps := make([]time.Time, len(samples))
+	for i, s := range samples {
+		inData[i] = s.InRate
+		outData[i] = s.OutRate
+		timestamps[i] = s.Timestamp
+	}
+
+	chartWidth := (v.width - 3) / 2
+	if chartWidth < 15 {
+		chartWidth = 15
+	}
+	chartHeight := panelHeight
+
+	inColors := components.ChartColors{
+		BarFg:   v.theme.Base0B,
+		LabelFg: v.theme.Base04,
+		TitleFg: v.theme.Base0D,
+		Bg:      v.theme.Base00,
+	}
+	outColors := components.ChartColors{
+		BarFg:   v.theme.Base0C,
+		LabelFg: v.theme.Base04,
+		TitleFg: v.theme.Base0D,
+		Bg:      v.theme.Base00,
+	}
+
+	inOpts := components.ChartOptions{
+		Timestamps: timestamps,
+		TimeFormat: v.timeFormat,
+		Label:      "In",
+	}
+	outOpts := components.ChartOptions{
+		Timestamps: timestamps,
+		TimeFormat: v.timeFormat,
+		Label:      "Out",
+	}
+
+	inChart := components.RenderChartWithOptions(inData, chartWidth, chartHeight, inColors, inOpts)
+	outChart := components.RenderChartWithOptions(outData, chartWidth, chartHeight, outColors, outOpts)
+
+	sepStyle := lipgloss.NewStyle().Foreground(v.theme.Base03).Background(v.theme.Base00)
+	sepLines := make([]string, chartHeight)
+	for i := range sepLines {
+		sepLines[i] = sepStyle.Render(" | ")
+	}
+	sep := strings.Join(sepLines, "\n")
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, inChart, sep, outChart)
 }
 
 // renderEmpty renders a centered message when no dashboard is loaded.
