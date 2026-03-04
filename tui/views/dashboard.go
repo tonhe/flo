@@ -306,6 +306,13 @@ func (v DashboardView) renderTableWithHeight(tableHeight int) string {
 		lines = append(lines, rows[i].text)
 	}
 
+	// Pad to fill allocated table height so the graph panel stays pinned
+	// to the bottom of the screen.
+	emptyRow := lipgloss.NewStyle().Background(v.theme.Base00).Render(strings.Repeat(" ", v.width))
+	for len(lines) < tableHeight {
+		lines = append(lines, emptyRow)
+	}
+
 	return strings.Join(lines, "\n")
 }
 
